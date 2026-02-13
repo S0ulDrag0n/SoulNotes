@@ -1,23 +1,27 @@
 // src/app/page.tsx
 "use client";
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import Image from 'next/image';
 import ReactMarkdown from 'react-markdown';
 
 // -----------------------------------------------------------------------------
 // Helper function to call backend APIs
 // -----------------------------------------------------------------------------
-async function callTranslateApi(text: string): Promise<string> {
+async function streamTextFromApi(
+  url: string,
+  body: Record<string, string>,
+  onChunk: (chunk: string) => void
+): Promise<string> {
   try {
-    const response = await fetch('/api/translate', {
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
+      body: JSON.stringify(body)
     });
 
     if (!response.ok) {
-      throw new Error('Translation API failed');
+      throw new Error('API request failed');
     }
 
     const reader = response.body?.getReader();
@@ -25,48 +29,28 @@ async function callTranslateApi(text: string): Promise<string> {
       throw new Error('Failed to get response stream');
     }
 
+    const decoder = new TextDecoder();
     let result = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      result += new TextDecoder().decode(value);
+      const chunk = decoder.decode(value, { stream: true });
+      if (chunk) {
+        result += chunk;
+        onChunk(chunk);
+      }
+    }
+
+    const tail = decoder.decode();
+    if (tail) {
+      result += tail;
+      onChunk(tail);
     }
     
     return result;
   } catch (err) {
-    console.error('Translation API error:', err);
-    throw new Error('Failed to translate text');
-  }
-}
-
-async function callSummarizeApi(text: string): Promise<string> {
-  try {
-    const response = await fetch('/api/summarize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
-    });
-
-    if (!response.ok) {
-      throw new Error('Summarization API failed');
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('Failed to get response stream');
-    }
-
-    let result = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      result += new TextDecoder().decode(value);
-    }
-    
-    return result;
-  } catch (err) {
-    console.error('Summarization API error:', err);
-    throw new Error('Failed to summarize text');
+    console.error('API stream error:', err);
+    throw new Error('Failed to fetch streamed text');
   }
 }
 
@@ -81,48 +65,241 @@ export default function Home() {
   const [isTranslating, setIsTranslating] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isRealtime, setIsRealtime] = useState(false);
+  const [realtimeLanguage, setRealtimeLanguage] = useState(
+    process.env.NEXT_PUBLIC_SPEACHES_TRANSCRIPTION_LANGUAGE ?? 'en'
+  );
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const transcriptionQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const wsRef = useRef<WebSocket | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+
+  const sendAudioChunk = async (audioBlob: Blob) => {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'audio.webm');
+
+    const response = await fetch('/api/transcribe', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error('Transcription API failed');
+    }
+
+    const text = await response.text();
+    if (text.trim()) {
+      setTranscript((prev) => (prev ? `${prev} ${text.trim()}` : text.trim()));
+    }
+  };
+
+  const realtimeUseSecure =
+    process.env.NEXT_PUBLIC_SPEACHES_REALTIME_SECURE === 'true';
+  const realtimeHost =
+    process.env.NEXT_PUBLIC_SPEACHES_REALTIME_HOST ?? '10.61.46.95:10300';
+  const realtimePath =
+    process.env.NEXT_PUBLIC_SPEACHES_REALTIME_PATH ?? '/v1/realtime';
+  const realtimeBaseUrl =
+    process.env.NEXT_PUBLIC_SPEACHES_REALTIME_URL ??
+    `${realtimeUseSecure ? 'wss' : 'ws'}://${realtimeHost}${realtimePath}`;
+  const realtimeModel =
+    process.env.NEXT_PUBLIC_SPEACHES_TRANSCRIBE_MODEL ??
+    'Systran/faster-whisper-large-v3';
+  const realtimeTranscriptionModel =
+    process.env.NEXT_PUBLIC_SPEACHES_TRANSCRIPTION_MODEL ??
+    realtimeModel;
+  const realtimeIntent = 'transcription';
+
+  const appendTranscript = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setTranscript((prev) => (prev ? `${prev} ${trimmed}` : trimmed));
+  };
+
+  const parseRealtimeMessage = (message: string) => {
+    try {
+      const data = JSON.parse(message);
+      if (typeof data === 'string') {
+        appendTranscript(data);
+        return;
+      }
+
+      if (data?.type === 'conversation.item.input_audio_transcription.completed') {
+        const transcription =
+          data.transcript ??
+          data.item?.transcript ??
+          data.item?.content?.[0]?.transcript ??
+          data.item?.payload?.transcriptions?.[0]?.text;
+        if (typeof transcription === 'string') {
+          appendTranscript(transcription);
+          return;
+        }
+      }
+
+      const text =
+        data.text ??
+        data.transcript ??
+        data.output_text ??
+        data.delta ??
+        data.content ??
+        data?.data?.text;
+      if (typeof text === 'string') {
+        appendTranscript(text);
+      }
+    } catch {
+      appendTranscript(message);
+    }
+  };
+
+  const floatTo16BitPCM = (input: Float32Array) => {
+    const output = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i += 1) {
+      const s = Math.max(-1, Math.min(1, input[i]));
+      output[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return output;
+  };
+
+  const downsampleBuffer = (
+    buffer: Float32Array,
+    inputSampleRate: number,
+    targetSampleRate: number
+  ) => {
+    if (inputSampleRate === targetSampleRate) {
+      return buffer;
+    }
+    const ratio = inputSampleRate / targetSampleRate;
+    const newLength = Math.round(buffer.length / ratio);
+    const result = new Float32Array(newLength);
+    let offset = 0;
+    for (let i = 0; i < newLength; i += 1) {
+      const nextOffset = Math.round((i + 1) * ratio);
+      let sum = 0;
+      let count = 0;
+      for (let j = offset; j < nextOffset && j < buffer.length; j += 1) {
+        sum += buffer[j];
+        count += 1;
+      }
+      result[i] = count > 0 ? sum / count : 0;
+      offset = nextOffset;
+    }
+    return result;
+  };
+
+  const int16ToBase64 = (input: Int16Array) => {
+    const byteView = new Uint8Array(input.buffer);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < byteView.length; i += chunkSize) {
+      const slice = byteView.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...slice);
+    }
+    return btoa(binary);
+  };
+
+  const setupRealtimeTranscription = async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        sampleRate: 24000,
+      },
+    });
+
+    const wsUrl = `${realtimeBaseUrl}?intent=${encodeURIComponent(realtimeIntent)}&model=${encodeURIComponent(realtimeModel)}&language=${encodeURIComponent(realtimeLanguage)}&transcription_model=${encodeURIComponent(realtimeTranscriptionModel)}`;
+    const ws = new WebSocket(wsUrl);
+
+    wsRef.current = ws;
+    mediaStreamRef.current = stream;
+
+    ws.onmessage = (event) => {
+      if (typeof event.data === 'string') {
+        parseRealtimeMessage(event.data);
+      }
+    };
+
+    ws.onerror = () => {
+      ws.close();
+    };
+
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onclose = () => reject(new Error('Realtime WebSocket closed'));
+      ws.onerror = () => reject(new Error('Realtime WebSocket error'));
+    });
+
+    const audioContext = new AudioContext({ sampleRate: 24000 });
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+    processor.onaudioprocess = (event) => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      const inputData = event.inputBuffer.getChannelData(0);
+      const resampled = downsampleBuffer(
+        inputData,
+        audioContext.sampleRate,
+        24000
+      );
+      const pcm16 = floatTo16BitPCM(resampled);
+      const base64 = int16ToBase64(pcm16);
+      wsRef.current.send(
+        JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 })
+      );
+    };
+
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+
+    audioContextRef.current = audioContext;
+    processorRef.current = processor;
+    setIsRealtime(true);
+  };
 
   // -------------------------------------------------------
   // Start recording with MediaRecorder API
   // -------------------------------------------------------
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream);
-      audioChunksRef.current = [];
+      setTranscript('');
+      setTranslation('');
+      setSummary('');
+      setIsTranscribing(true);
+      setIsProcessing(false);
+      setIsRealtime(false);
 
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        audioChunksRef.current.push(event.data);
-      };
+      try {
+        await setupRealtimeTranscription();
+      } catch (err) {
+        console.error('Realtime setup failed, falling back to POST:', err);
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorderRef.current = new MediaRecorder(stream);
 
-      mediaRecorderRef.current.onstop = async () => {
-        // Convert audio chunks to blob
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        
-        // Process audio with Whisper model
-        setIsProcessing(true);
-        try {
-          // In a real implementation, you would upload the audio blob to your backend
-          // which would then process it with Whisper
-          // For now, we'll simulate the process
-          
-          // Simulate Whisper processing delay
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          // Simulated transcript
-          setTranscript("This is a simulated transcript from the recorded audio. In a real implementation, this would be generated by a Whisper model processing the actual audio input.");
-        } catch (err) {
-          console.error('Audio processing error:', err);
-          alert('Failed to process audio');
-        } finally {
-          setIsProcessing(false);
-        }
-      };
+        mediaRecorderRef.current.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            setIsProcessing(true);
+            transcriptionQueueRef.current = transcriptionQueueRef.current
+              .then(() => sendAudioChunk(event.data))
+              .catch((queueErr) => {
+                console.error('Audio processing error:', queueErr);
+              })
+              .finally(() => {
+                setIsProcessing(false);
+              });
+          }
+        };
 
-      mediaRecorderRef.current.start();
+        mediaRecorderRef.current.onstop = () => {
+          transcriptionQueueRef.current.finally(() => setIsTranscribing(false));
+        };
+
+        mediaRecorderRef.current.start(30000);
+      }
+
       setIsRecording(true);
     } catch (err) {
       console.error('Error accessing microphone:', err);
@@ -137,12 +314,44 @@ export default function Home() {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      setIsProcessing(false);
       
       // Stop all tracks
       if (mediaRecorderRef.current.stream) {
         mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
       }
     }
+
+    if (isRealtime) {
+      try {
+        wsRef.current?.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+
+    setIsRealtime(false);
+    setIsTranscribing(false);
   };
 
   // -------------------------------------------------------
@@ -151,9 +360,11 @@ export default function Home() {
   const translate = async () => {
     if (!transcript) return;
     setIsTranslating(true);
+    setTranslation('');
     try {
-      const result = await callTranslateApi(transcript);
-      setTranslation(result);
+      await streamTextFromApi('/api/translate', { text: transcript }, (chunk) =>
+        setTranslation((prev) => prev + chunk)
+      );
     } catch (err) {
       console.error(err);
       alert('Translation failed');
@@ -168,9 +379,11 @@ export default function Home() {
   const summarize = async () => {
     if (!translation) return;
     setIsSummarizing(true);
+    setSummary('');
     try {
-      const result = await callSummarizeApi(translation);
-      setSummary(result);
+      await streamTextFromApi('/api/summarize', { text: translation }, (chunk) =>
+        setSummary((prev) => prev + chunk)
+      );
     } catch (err) {
       console.error(err);
       alert('Summarization failed');
@@ -197,6 +410,25 @@ export default function Home() {
 
         {/* Recording controls */}
         <div className="mt-8 flex flex-col sm:flex-row gap-4">
+          <label className="flex flex-col text-sm font-medium text-gray-700 dark:text-gray-200">
+            Language
+            <select
+              value={realtimeLanguage}
+              onChange={(event) => setRealtimeLanguage(event.target.value)}
+              className="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            >
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="it">Italian</option>
+              <option value="pt">Portuguese</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="zh">Chinese</option>
+              <option value="ar">Arabic</option>
+            </select>
+          </label>
           <button
             onClick={startRecording}
             disabled={isRecording || isProcessing}
@@ -216,7 +448,9 @@ export default function Home() {
         {/* Transcript display */}
         <div className="mt-6 w-full">
           <h2 className="font-semibold">Transcript</h2>
-          <p className="border rounded p-2 bg-gray-100 dark:bg-gray-800 min-h-[60px]">{transcript || 'No transcript yet.'}</p>
+          <p className="border rounded p-2 bg-gray-100 dark:bg-gray-800 min-h-[60px]">
+            {transcript || (isTranscribing ? 'Transcribing…' : 'No transcript yet.')}
+          </p>
         </div>
 
         {/* Translate button & result */}
@@ -226,7 +460,7 @@ export default function Home() {
             disabled={!transcript || isTranslating}
             className="flex items-center justify-center rounded-md px-4 py-2 bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
           >
-            {isTranslating ? 'Translating…' : 'Translate to Spanish'}
+            {isTranslating ? 'Translating…' : 'Translate to English'}
           </button>
           <div className="border rounded p-2 mt-2 bg-gray-100 dark:bg-gray-800 min-h-[60px]">
             {translation || 'Translation will appear here.'}

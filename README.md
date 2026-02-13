@@ -16,6 +16,25 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Environment Variables
+
+Create a `.env.local` file and set any of the following if you need to override defaults:
+
+```bash
+# Realtime WebSocket (live transcription)
+NEXT_PUBLIC_SPEACHES_REALTIME_URL=
+NEXT_PUBLIC_SPEACHES_REALTIME_SECURE=false
+NEXT_PUBLIC_SPEACHES_REALTIME_HOST=10.61.46.95:10300
+NEXT_PUBLIC_SPEACHES_REALTIME_PATH=/v1/realtime
+NEXT_PUBLIC_SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3
+
+# REST transcription fallback
+SPEACHES_BASE_URL=http://10.61.46.95:10300
+SPEACHES_TRANSCRIBE_ENDPOINT=/v1/audio/transcriptions
+SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3
+SPEACHES_TRANSCRIBE_LANGUAGE=zh
+```
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
