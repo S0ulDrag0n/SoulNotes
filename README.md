@@ -33,6 +33,10 @@ SPEACHES_BASE_URL=http://10.61.46.95:10300
 SPEACHES_TRANSCRIBE_ENDPOINT=/v1/audio/transcriptions
 SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3
 SPEACHES_TRANSCRIBE_LANGUAGE=zh
+
+# Ollama translation
+OLLAMA_BASE_URL=http://10.61.46.95:10102
+OLLAMA_TRANSLATE_MODEL=gemma3:12b
 ```
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.

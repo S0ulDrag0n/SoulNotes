@@ -1,7 +1,7 @@
 // src/app/page.tsx
 "use client";
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import ReactMarkdown from 'react-markdown';
 
@@ -62,7 +62,6 @@ export default function Home() {
   const [transcript, setTranscript] = useState('');
   const [translation, setTranslation] = useState('');
   const [summary, setSummary] = useState('');
-  const [isTranslating, setIsTranslating] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -73,6 +72,7 @@ export default function Home() {
   const [chineseVariant, setChineseVariant] = useState<'simplified' | 'traditional'>(
     'traditional'
   );
+  const [targetLanguage, setTargetLanguage] = useState('en');
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const transcriptionQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -80,6 +80,13 @@ export default function Home() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const translateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const translateRequestIdRef = useRef(0);
+  const latestTranscriptRef = useRef('');
+  const latestSourceLanguageRef = useRef('');
+  const latestTargetLanguageRef = useRef('');
+  const lastTranslatedTextRef = useRef('');
+  const lastTranslationLanguageRef = useRef('');
 
   const sendAudioChunk = async (audioBlob: Blob) => {
     const formData = new FormData();
@@ -125,6 +132,10 @@ export default function Home() {
 
   const selectedLanguage =
     realtimeLanguage === 'zh' ? `zh-${chineseVariant}` : realtimeLanguage;
+
+  latestTranscriptRef.current = transcript;
+  latestSourceLanguageRef.current = selectedLanguage;
+  latestTargetLanguageRef.current = targetLanguage;
 
   const buildSessionInstructions = () => {
     let extraInstructions = '';
@@ -399,21 +410,69 @@ export default function Home() {
   // -------------------------------------------------------
   // Translate using backend API
   // -------------------------------------------------------
-  const translate = async () => {
-    if (!transcript) return;
-    setIsTranslating(true);
-    setTranslation('');
+  const translate = async (requestId: number, text: string) => {
     try {
-      await streamTextFromApi('/api/translate', { text: transcript }, (chunk) =>
-        setTranslation((prev) => prev + chunk)
+      let hasStarted = false;
+      await streamTextFromApi(
+        '/api/translate',
+        {
+          text,
+          sourceLanguage: latestSourceLanguageRef.current,
+          targetLanguage: latestTargetLanguageRef.current
+        },
+        (chunk) => {
+          if (translateRequestIdRef.current !== requestId) {
+            return;
+          }
+          if (!hasStarted) {
+            hasStarted = true;
+            setTranslation(chunk);
+            return;
+          }
+          setTranslation((prev) => prev + chunk);
+        }
       );
     } catch (err) {
       console.error(err);
       alert('Translation failed');
     } finally {
-      setIsTranslating(false);
+      // No UI flag needed for live translation
     }
   };
+
+  useEffect(() => {
+    if (translateIntervalRef.current) {
+      return;
+    }
+    translateIntervalRef.current = setInterval(() => {
+      const text = latestTranscriptRef.current.trim();
+      if (!text) {
+        return;
+      }
+
+      const languageKey = `${latestSourceLanguageRef.current}|${latestTargetLanguageRef.current}`;
+      if (lastTranslationLanguageRef.current !== languageKey) {
+        lastTranslationLanguageRef.current = languageKey;
+        lastTranslatedTextRef.current = '';
+      }
+
+      if (text === lastTranslatedTextRef.current) {
+        return;
+      }
+
+      const requestId = translateRequestIdRef.current + 1;
+      translateRequestIdRef.current = requestId;
+      lastTranslatedTextRef.current = text;
+      translate(requestId, text);
+    }, 1500);
+
+    return () => {
+      if (translateIntervalRef.current) {
+        clearInterval(translateIntervalRef.current);
+        translateIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   // -------------------------------------------------------
   // Summarize using backend API
@@ -453,7 +512,7 @@ export default function Home() {
         {/* Recording controls */}
         <div className="mt-8 flex flex-col sm:flex-row gap-4">
           <label className="flex flex-col text-sm font-medium text-gray-700 dark:text-gray-200">
-            Language
+            Source Language
             <select
               value={selectedLanguage}
               onChange={(event) => {
@@ -511,13 +570,26 @@ export default function Home() {
 
         {/* Translate button & result */}
         <div className="mt-4 w-full">
-          <button
-            onClick={translate}
-            disabled={!transcript || isTranslating}
-            className="flex items-center justify-center rounded-md px-4 py-2 bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            {isTranslating ? 'Translating…' : 'Translate to English'}
-          </button>
+          <label className="flex flex-col text-sm font-medium text-gray-700 dark:text-gray-200">
+            Target Language
+            <select
+              value={targetLanguage}
+              onChange={(event) => setTargetLanguage(event.target.value)}
+              className="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            >
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="it">Italian</option>
+              <option value="pt">Portuguese</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="zh-simplified">Chinese (Simplified)</option>
+              <option value="zh-traditional">Chinese (Traditional)</option>
+              <option value="ar">Arabic</option>
+            </select>
+          </label>
           <div className="border rounded p-2 mt-2 bg-gray-100 dark:bg-gray-800 min-h-[60px]">
             {translation || 'Translation will appear here.'}
           </div>
