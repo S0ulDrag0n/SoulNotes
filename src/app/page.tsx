@@ -68,7 +68,7 @@ export default function Home() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isRealtime, setIsRealtime] = useState(false);
   const [realtimeLanguage, setRealtimeLanguage] = useState(
-    process.env.NEXT_PUBLIC_SPEACHES_TRANSCRIPTION_LANGUAGE ?? 'en'
+    process.env.NEXT_PUBLIC_SPEACHES_TRANSCRIPTION_LANGUAGE ?? 'zh'
   );
   const [chineseVariant, setChineseVariant] = useState<'simplified' | 'traditional'>(
     'traditional'
