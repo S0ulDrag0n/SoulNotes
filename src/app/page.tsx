@@ -590,7 +590,7 @@ export default function Home() {
               <option value="ar">Arabic</option>
             </select>
           </label>
-          <div className="border rounded p-2 mt-2 bg-gray-100 dark:bg-gray-800 min-h-[60px]">
+          <div className="border rounded p-2 mt-2 bg-gray-100 dark:bg-gray-800 min-h-[60px] whitespace-pre-wrap">
             {translation || 'Translation will appear here.'}
           </div>
         </div>

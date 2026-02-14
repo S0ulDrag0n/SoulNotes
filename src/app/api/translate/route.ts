@@ -36,33 +36,23 @@ export async function POST(req: Request) {
 
   const sourceLabel = resolveLanguageLabel(sourceLanguage);
   const targetLabel = resolveLanguageLabel(targetLanguage);
-  const prompt = `Translate the following text from ${sourceLabel} to ${targetLabel}. Only return the translated text.\n\n${text}`;
+  const prompt = `Translate the following text from ${sourceLabel} to ${targetLabel}. Translate as literally as possible. Preserve wording, order, repetition, fragments, and informal phrasing. Do not paraphrase or smooth the text. Do not add explanations or inferred meaning. Only return the translated text. Use clear paragraph breaks with a blank line between paragraphs.\n\n${text}`;
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        const ollama = new Ollama({
-          host: process.env.OLLAMA_BASE_URL ?? 'http://10.61.46.95:10102',
-        });
-        const response = await ollama.chat({
-          model: process.env.OLLAMA_TRANSLATE_MODEL ?? 'gemma3:12b',
-          messages: [{ role: 'user', content: prompt }],
-          stream: true,
-        });
-
-        for await (const chunk of response) {
-          controller.enqueue(encoder.encode(chunk.message.content));
-        }
-      } catch (err) {
-        controller.error(err);
-      } finally {
-        controller.close();
-      }
-    }
+  const ollama = new Ollama({
+    host: process.env.OLLAMA_BASE_URL ?? 'http://10.61.46.95:10102',
   });
 
-  return new Response(stream, {
-    headers: { 'Content-Type': 'text/plain' }
-  });
+  try {
+    const response = await ollama.chat({
+      model: process.env.OLLAMA_TRANSLATE_MODEL ?? 'aya-expanse:latest',
+      messages: [{ role: 'user', content: prompt }],
+      stream: false,
+    });
+
+    return new Response(response.message.content ?? '', {
+      headers: { 'Content-Type': 'text/plain' }
+    });
+  } catch (err) {
+    return new Response('Translation failed', { status: 500 });
+  }
 }
