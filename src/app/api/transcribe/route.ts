@@ -9,8 +9,9 @@ export async function POST(req: Request) {
   }
 
   const speechBaseUrl = process.env.SPEACHES_BASE_URL ?? 'http://10.61.46.95:10300';
-  const speechEndpoint = process.env.SPEACHES_TRANSCRIBE_ENDPOINT ?? '/v1/audio/transcriptions';
-  const speechModel = process.env.SPEACHES_TRANSCRIBE_MODEL ?? 'Systran/faster-whisper-large-v3';
+  const speechEndpoint = '/v1/audio/transcriptions';
+  const speechModel =
+    process.env.SPEACHES_TRANSCRIBE_MODEL ?? 'Systran/faster-whisper-large-v3';
   const speechLanguage = process.env.SPEACHES_TRANSCRIBE_LANGUAGE;
 
   const upstreamForm = new FormData();

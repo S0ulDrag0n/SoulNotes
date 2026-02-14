@@ -65,9 +65,7 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isRealtime, setIsRealtime] = useState(false);
-  const [realtimeLanguage, setRealtimeLanguage] = useState(
-    process.env.NEXT_PUBLIC_SPEACHES_TRANSCRIPTION_LANGUAGE ?? 'zh'
-  );
+  const [realtimeLanguage, setRealtimeLanguage] = useState('zh');
   const [chineseVariant, setChineseVariant] = useState<'simplified' | 'traditional'>(
     'traditional'
   );
@@ -76,6 +74,11 @@ export default function Home() {
     'translation'
   );
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [realtimeConfig, setRealtimeConfig] = useState({
+    baseUrl: 'http://10.61.46.95:10300',
+    transcribeModel: 'Systran/faster-whisper-large-v3',
+    defaultLanguage: 'zh'
+  });
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const transcriptionQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -92,6 +95,7 @@ export default function Home() {
   const lastTranslationLanguageRef = useRef('');
   const summarizeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSummarizedTextRef = useRef('');
+  const languageTouchedRef = useRef(false);
 
   const sendAudioChunk = async (audioBlob: Blob) => {
     const formData = new FormData();
@@ -112,21 +116,12 @@ export default function Home() {
     }
   };
 
-  const realtimeUseSecure =
-    process.env.NEXT_PUBLIC_SPEACHES_REALTIME_SECURE === 'true';
-  const realtimeHost =
-    process.env.NEXT_PUBLIC_SPEACHES_REALTIME_HOST ?? '10.61.46.95:10300';
-  const realtimePath =
-    process.env.NEXT_PUBLIC_SPEACHES_REALTIME_PATH ?? '/v1/realtime';
-  const realtimeBaseUrl =
-    process.env.NEXT_PUBLIC_SPEACHES_REALTIME_URL ??
-    `${realtimeUseSecure ? 'wss' : 'ws'}://${realtimeHost}${realtimePath}`;
-  const realtimeModel =
-    process.env.NEXT_PUBLIC_SPEACHES_TRANSCRIBE_MODEL ??
-    'Systran/faster-whisper-large-v3';
-  const realtimeTranscriptionModel =
-    process.env.NEXT_PUBLIC_SPEACHES_TRANSCRIPTION_MODEL ??
-    realtimeModel;
+  const realtimeBaseUrl = (() => {
+    const url = new URL('/v1/realtime', realtimeConfig.baseUrl);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    return url.toString();
+  })();
+  const realtimeModel = realtimeConfig.transcribeModel;
   const realtimeIntent = 'transcription';
   const baseInstructions =
     'Your knowledge cutoff is 2023-10. You are a helpful, witty, and friendly AI. ' +
@@ -141,6 +136,34 @@ export default function Home() {
   latestTranscriptRef.current = transcript;
   latestSourceLanguageRef.current = selectedLanguage;
   latestTargetLanguageRef.current = targetLanguage;
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadConfig = async () => {
+      try {
+        const response = await fetch('/api/config');
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!isActive) return;
+        setRealtimeConfig({
+          baseUrl: data.speachesBaseUrl ?? realtimeConfig.baseUrl,
+          transcribeModel: data.speachesTranscribeModel ?? realtimeConfig.transcribeModel,
+          defaultLanguage: data.speachesTranscribeLanguage ?? realtimeConfig.defaultLanguage
+        });
+        if (!languageTouchedRef.current && data.speachesTranscribeLanguage) {
+          setRealtimeLanguage(data.speachesTranscribeLanguage);
+        }
+      } catch {
+        // Ignore config fetch failures and keep defaults
+      }
+    };
+
+    loadConfig();
+    return () => {
+      isActive = false;
+    };
+  }, [realtimeConfig.baseUrl, realtimeConfig.defaultLanguage, realtimeConfig.transcribeModel]);
 
   useEffect(() => {
     const themeMatch = document.cookie.match(/(?:^|; )theme=(dark|light)/);
@@ -187,7 +210,7 @@ export default function Home() {
         type: 'session.update',
         session: {
           instructions: buildSessionInstructions(),
-          input_audio_transcription: { model: realtimeTranscriptionModel }
+          input_audio_transcription: { model: realtimeModel }
         }
       })
     );
@@ -288,7 +311,7 @@ export default function Home() {
       },
     });
 
-    const wsUrl = `${realtimeBaseUrl}?intent=${encodeURIComponent(realtimeIntent)}&model=${encodeURIComponent(realtimeModel)}&language=${encodeURIComponent(realtimeLanguage)}&transcription_model=${encodeURIComponent(realtimeTranscriptionModel)}`;
+    const wsUrl = `${realtimeBaseUrl}?intent=${encodeURIComponent(realtimeIntent)}&model=${encodeURIComponent(realtimeModel)}&language=${encodeURIComponent(realtimeLanguage)}`;
     const ws = new WebSocket(wsUrl);
 
     wsRef.current = ws;
@@ -605,6 +628,7 @@ export default function Home() {
                   <select
                     value={selectedLanguage}
                     onChange={(event) => {
+                      languageTouchedRef.current = true;
                       const value = event.target.value;
                       if (value === 'zh-simplified') {
                         setRealtimeLanguage('zh');

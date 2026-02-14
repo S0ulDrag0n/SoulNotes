@@ -28,17 +28,11 @@ Run with all supported parameters:
 
 ```bash
 docker run --rm -p 3000:3000 \
-	-e NEXT_PUBLIC_SPEACHES_REALTIME_URL= \
-	-e NEXT_PUBLIC_SPEACHES_REALTIME_SECURE=false \
-	-e NEXT_PUBLIC_SPEACHES_REALTIME_HOST=10.61.46.95:10300 \
-	-e NEXT_PUBLIC_SPEACHES_REALTIME_PATH=/v1/realtime \
-	-e NEXT_PUBLIC_SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
 	-e SPEACHES_BASE_URL=http://10.61.46.95:10300 \
-	-e SPEACHES_TRANSCRIBE_ENDPOINT=/v1/audio/transcriptions \
 	-e SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
 	-e SPEACHES_TRANSCRIBE_LANGUAGE=zh \
 	-e OLLAMA_BASE_URL=http://10.61.46.95:10102 \
-	-e OLLAMA_TRANSLATE_MODEL=gemma3:12b \
+	-e OLLAMA_TRANSLATE_MODEL=aya-expanse:latest \
 	-e OLLAMA_SUMMARIZE_MODEL=gemma3:12b \
 	soulnotes:latest
 ```
@@ -48,22 +42,14 @@ docker run --rm -p 3000:3000 \
 Create a `.env.local` file and set any of the following if you need to override defaults:
 
 ```bash
-# Realtime WebSocket (live transcription)
-NEXT_PUBLIC_SPEACHES_REALTIME_URL=
-NEXT_PUBLIC_SPEACHES_REALTIME_SECURE=false
-NEXT_PUBLIC_SPEACHES_REALTIME_HOST=10.61.46.95:10300
-NEXT_PUBLIC_SPEACHES_REALTIME_PATH=/v1/realtime
-NEXT_PUBLIC_SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3
-
-# REST transcription fallback
+# Speaches (realtime + fallback)
 SPEACHES_BASE_URL=http://10.61.46.95:10300
-SPEACHES_TRANSCRIBE_ENDPOINT=/v1/audio/transcriptions
 SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3
 SPEACHES_TRANSCRIBE_LANGUAGE=zh
 
 # Ollama translation
 OLLAMA_BASE_URL=http://10.61.46.95:10102
-OLLAMA_TRANSLATE_MODEL=gemma3:12b
+OLLAMA_TRANSLATE_MODEL=aya-expanse:latest
 
 # Ollama summarization
 OLLAMA_SUMMARIZE_MODEL=gemma3:12b
