@@ -10,13 +10,15 @@ import ReactMarkdown from 'react-markdown';
 async function streamTextFromApi(
   url: string,
   body: Record<string, string>,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  signal?: AbortSignal
 ): Promise<string> {
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal
     });
 
     if (!response.ok) {
@@ -88,6 +90,8 @@ export default function Home() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const translateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const translateRequestIdRef = useRef(0);
+  const translateAbortRef = useRef<AbortController | null>(null);
+  const lastTranscriptUpdateRef = useRef(0);
   const latestTranscriptRef = useRef('');
   const latestSourceLanguageRef = useRef('');
   const latestTargetLanguageRef = useRef('');
@@ -140,6 +144,10 @@ export default function Home() {
   latestTranscriptRef.current = transcript;
   latestSourceLanguageRef.current = selectedLanguage;
   latestTargetLanguageRef.current = targetLanguage;
+
+  useEffect(() => {
+    lastTranscriptUpdateRef.current = Date.now();
+  }, [transcript]);
 
   useEffect(() => {
     let isActive = true;
@@ -505,6 +513,9 @@ export default function Home() {
   // Translate using backend API
   // -------------------------------------------------------
   const translate = async (requestId: number, text: string) => {
+    translateAbortRef.current?.abort();
+    const controller = new AbortController();
+    translateAbortRef.current = controller;
     try {
       let hasStarted = false;
       await streamTextFromApi(
@@ -524,12 +535,19 @@ export default function Home() {
             return;
           }
           setTranslation((prev) => prev + chunk);
-        }
+        },
+        controller.signal
       );
     } catch (err) {
+      if (controller.signal.aborted) {
+        return;
+      }
       console.error(err);
       alert('Translation failed');
     } finally {
+      if (translateAbortRef.current === controller) {
+        translateAbortRef.current = null;
+      }
       // No UI flag needed for live translation
     }
   };
@@ -541,6 +559,10 @@ export default function Home() {
     translateIntervalRef.current = setInterval(() => {
       const text = latestTranscriptRef.current.trim();
       if (!text) {
+        return;
+      }
+
+      if (Date.now() - lastTranscriptUpdateRef.current < 900) {
         return;
       }
 

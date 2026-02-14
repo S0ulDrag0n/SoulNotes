@@ -46,11 +46,28 @@ export async function POST(req: Request) {
     const response = await ollama.chat({
       model: process.env.OLLAMA_TRANSLATE_MODEL ?? 'aya-expanse:latest',
       messages: [{ role: 'user', content: prompt }],
-      stream: false,
+      stream: true,
     });
 
-    return new Response(response.message.content ?? '', {
-      headers: { 'Content-Type': 'text/plain' }
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          for await (const part of response) {
+            const chunk = part?.message?.content ?? '';
+            if (chunk) {
+              controller.enqueue(encoder.encode(chunk));
+            }
+          }
+          controller.close();
+        } catch (error) {
+          controller.error(error);
+        }
+      }
+    });
+
+    return new Response(stream, {
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' }
     });
   } catch (err) {
     return new Response('Translation failed', { status: 500 });
