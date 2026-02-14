@@ -659,7 +659,7 @@ export default function Home() {
                   Live
                 </span>
               </div>
-              <p className="mt-4 min-h-[160px] whitespace-pre-wrap text-sm text-[#2a241b] dark:text-[#f0e6d5]">
+              <p className="mt-4 min-h-[160px] max-h-[min(45vh,360px)] overflow-auto whitespace-pre-wrap text-sm text-[#2a241b] dark:text-[#f0e6d5]">
                 {transcript || (isTranscribing ? 'Transcribing…' : 'No transcript yet.')}
               </p>
             </div>
@@ -719,7 +719,7 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className="mt-6 min-h-[280px] rounded-xl border border-[#efe0c3] bg-white/60 p-4 text-sm text-[#2a241b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f0e6d5]">
+              <div className="mt-6 min-h-[280px] max-h-[min(55vh,520px)] overflow-auto rounded-xl border border-[#efe0c3] bg-white/60 p-4 text-sm text-[#2a241b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f0e6d5]">
                 {activePanel === 'translation' ? (
                   <p className="whitespace-pre-wrap">
                     {translation || 'Translation will appear here.'}
