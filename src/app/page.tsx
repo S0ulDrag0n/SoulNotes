@@ -2,7 +2,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from 'react';
-import Image from 'next/image';
 import ReactMarkdown from 'react-markdown';
 
 // -----------------------------------------------------------------------------
@@ -73,6 +72,10 @@ export default function Home() {
     'traditional'
   );
   const [targetLanguage, setTargetLanguage] = useState('en');
+  const [activePanel, setActivePanel] = useState<'translation' | 'summary'>(
+    'translation'
+  );
+  const [isDarkMode, setIsDarkMode] = useState(false);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const transcriptionQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -138,6 +141,30 @@ export default function Home() {
   latestTranscriptRef.current = transcript;
   latestSourceLanguageRef.current = selectedLanguage;
   latestTargetLanguageRef.current = targetLanguage;
+
+  useEffect(() => {
+    const themeMatch = document.cookie.match(/(?:^|; )theme=(dark|light)/);
+    if (themeMatch?.[1] === 'dark') {
+      setIsDarkMode(true);
+      document.documentElement.classList.add('dark');
+      return;
+    }
+    if (themeMatch?.[1] === 'light') {
+      document.documentElement.classList.remove('dark');
+      return;
+    }
+    const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+    if (prefersDark) {
+      setIsDarkMode(true);
+      document.documentElement.classList.add('dark');
+    }
+  }, []);
+
+  useEffect(() => {
+    const value = isDarkMode ? 'dark' : 'light';
+    document.cookie = `theme=${value}; path=/; max-age=31536000`;
+    document.documentElement.classList.toggle('dark', isDarkMode);
+  }, [isDarkMode]);
 
   const buildSessionInstructions = () => {
     let extraInstructions = '';
@@ -528,155 +555,204 @@ export default function Home() {
   // UI rendering
   // -------------------------------------------------------
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      {/* Header with logo */}
-      <main className="flex flex-col items-center w-full max-w-3xl py-12 px-8 sm:px-12 bg-white dark:bg-black">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-
-        {/* Recording controls */}
-        <div className="mt-8 flex flex-col sm:flex-row gap-4">
-          <label className="flex flex-col text-sm font-medium text-gray-700 dark:text-gray-200">
-            Source Language
-            <select
-              value={selectedLanguage}
-              onChange={(event) => {
-                const value = event.target.value;
-                if (value === 'zh-simplified') {
-                  setRealtimeLanguage('zh');
-                  setChineseVariant('simplified');
-                  return;
-                }
-                if (value === 'zh-traditional') {
-                  setRealtimeLanguage('zh');
-                  setChineseVariant('traditional');
-                  return;
-                }
-                setRealtimeLanguage(value);
-              }}
-              className="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            >
-              <option value="en">English</option>
-              <option value="es">Spanish</option>
-              <option value="fr">French</option>
-              <option value="de">German</option>
-              <option value="it">Italian</option>
-              <option value="pt">Portuguese</option>
-              <option value="ja">Japanese</option>
-              <option value="ko">Korean</option>
-              <option value="zh-simplified">Chinese (Simplified)</option>
-              <option value="zh-traditional">Chinese (Traditional)</option>
-              <option value="ar">Arabic</option>
-            </select>
-          </label>
-          <button
-            onClick={startRecording}
-            disabled={isRecording || isProcessing}
-            className="flex-1 flex items-center justify-center rounded-md px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {isRecording ? 'Recording…' : isProcessing ? 'Processing…' : 'Start Recording'}
-          </button>
-          <button
-            onClick={stopRecording}
-            disabled={!isRecording}
-            className="flex-1 flex items-center justify-center rounded-md px-4 py-2 bg-gray-600 text-white hover:bg-gray-700 disabled:opacity-50"
-          >
-            Stop Recording
-          </button>
-        </div>
-
-        {/* Transcript display */}
-        <div className="mt-6 w-full">
-          <h2 className="font-semibold">Transcript</h2>
-          <p className="border rounded p-2 bg-gray-100 dark:bg-gray-800 min-h-[60px]">
-            {transcript || (isTranscribing ? 'Transcribing…' : 'No transcript yet.')}
-          </p>
-        </div>
-
-        {/* Translate button & result */}
-        <div className="mt-4 w-full">
-          <label className="flex flex-col text-sm font-medium text-gray-700 dark:text-gray-200">
-            Target Language
-            <select
-              value={targetLanguage}
-              onChange={(event) => setTargetLanguage(event.target.value)}
-              className="mt-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            >
-              <option value="en">English</option>
-              <option value="es">Spanish</option>
-              <option value="fr">French</option>
-              <option value="de">German</option>
-              <option value="it">Italian</option>
-              <option value="pt">Portuguese</option>
-              <option value="ja">Japanese</option>
-              <option value="ko">Korean</option>
-              <option value="zh-simplified">Chinese (Simplified)</option>
-              <option value="zh-traditional">Chinese (Traditional)</option>
-              <option value="ar">Arabic</option>
-            </select>
-          </label>
-          <div className="border rounded p-2 mt-2 bg-gray-100 dark:bg-gray-800 min-h-[60px] whitespace-pre-wrap">
-            {translation || 'Translation will appear here.'}
+    <div className="min-h-screen bg-[radial-gradient(1200px_circle_at_15%_-10%,#fff3c4_0%,#f7efe2_38%,#efe8da_100%)] text-[#1f1c16] dark:bg-[radial-gradient(1200px_circle_at_15%_-10%,#2a2117_0%,#13100c_45%,#0c0a08_100%)] dark:text-[#f6f1e6]">
+        <main className="mx-auto w-full max-w-6xl px-6 py-12">
+          <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.32em] text-[#8b7a5a] dark:text-[#c9b89f]">
+              SoulNotes
+            </p>
+            <h1 className="text-3xl font-semibold text-[#1b1a16] dark:text-[#f4e9da] sm:text-4xl">
+              Live Transcribe. Translate. Summarize.
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-[#524637] dark:text-[#c8b7a0]">
+              Capture realtime speech, translate on the fly, and get structured notes
+              without leaving the page.
+            </p>
           </div>
-        </div>
-
-        {/* Summary result */}
-        <div className="mt-4 w-full">
-          <div className="border rounded p-2 mt-2 bg-gray-100 dark:bg-gray-800 min-h-[60px] leading-relaxed">
-            {summary ? (
-              <ReactMarkdown
-                components={{
-                  ul: ({ node, ...props }) => (
-                    <ul className="list-disc list-inside space-y-1" {...props} />
-                  ),
-                  ol: ({ node, ...props }) => (
-                    <ol className="list-decimal list-inside space-y-1" {...props} />
-                  ),
-                  p: ({ node, ...props }) => <p className="mb-3" {...props} />,
-                  h1: ({ node, ...props }) => (
-                    <h1 className="text-lg font-semibold mb-2" {...props} />
-                  ),
-                  h2: ({ node, ...props }) => (
-                    <h2 className="text-base font-semibold mb-2" {...props} />
-                  ),
-                  h3: ({ node, ...props }) => (
-                    <h3 className="text-sm font-semibold mb-2" {...props} />
-                  )
-                }}
-              >
-                {summary}
-              </ReactMarkdown>
-            ) : (
-              'Summary will appear here.'
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsDarkMode((prev) => !prev)}
+              className="rounded-full border border-[#d7c7a7] bg-white/70 px-3 py-1 text-xs font-medium text-[#6b5a3f] transition hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#cdbda6] dark:hover:bg-[#2a2218]"
+            >
+              {isDarkMode ? 'Light Mode' : 'Dark Mode'}
+            </button>
+            <span className="rounded-full border border-[#d7c7a7] bg-white/70 px-3 py-1 text-xs font-medium text-[#6b5a3f] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#cdbda6]">
+              {isRealtime ? 'Realtime' : 'Fallback'}
+            </span>
+            <span className="rounded-full border border-[#d7c7a7] bg-white/70 px-3 py-1 text-xs font-medium text-[#6b5a3f] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#cdbda6]">
+              {isRecording ? 'Recording' : 'Idle'}
+            </span>
+            <span className="rounded-full border border-[#d7c7a7] bg-white/70 px-3 py-1 text-xs font-medium text-[#6b5a3f] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#cdbda6]">
+              {isProcessing ? 'Processing' : isTranscribing ? 'Transcribing' : 'Ready'}
+            </span>
           </div>
-        </div>
+        </header>
 
-        {/* Deployment & docs buttons (original links) */}
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row mt-8">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image className="dark:invert" src="/vercel.svg" alt="Vercel logomark" width={16} height={16} />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <div className="mt-10 grid gap-6 lg:grid-cols-[1.1fr_1fr]">
+          <section className="flex flex-col gap-6">
+            <div className="rounded-2xl border border-black/10 bg-white/80 p-6 shadow-[0_20px_60px_-50px_rgba(51,41,25,0.6)] backdrop-blur dark:border-white/10 dark:bg-[#15120d]/85">
+              <div className="flex flex-col gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-[#1f1c16] dark:text-[#f3e9d8]">Capture</h2>
+                  <p className="text-sm text-[#6b5a3f] dark:text-[#c8b7a0]">
+                    Choose the source language and start recording.
+                  </p>
+                </div>
+                <label className="flex flex-col gap-2 text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+                  Source Language
+                  <select
+                    value={selectedLanguage}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      if (value === 'zh-simplified') {
+                        setRealtimeLanguage('zh');
+                        setChineseVariant('simplified');
+                        return;
+                      }
+                      if (value === 'zh-traditional') {
+                        setRealtimeLanguage('zh');
+                        setChineseVariant('traditional');
+                        return;
+                      }
+                      setRealtimeLanguage(value);
+                    }}
+                    className="rounded-xl border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  >
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="it">Italian</option>
+                    <option value="pt">Portuguese</option>
+                    <option value="ja">Japanese</option>
+                    <option value="ko">Korean</option>
+                    <option value="zh-simplified">Chinese (Simplified)</option>
+                    <option value="zh-traditional">Chinese (Traditional)</option>
+                    <option value="ar">Arabic</option>
+                  </select>
+                </label>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={startRecording}
+                    disabled={isRecording || isProcessing}
+                    className="flex-1 rounded-xl bg-[#1f1c16] px-4 py-2 text-sm font-semibold text-[#f6e9cc] transition hover:bg-[#342d22] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#f6e9cc] dark:text-[#1f1c16] dark:hover:bg-[#e9d3a7]"
+                  >
+                    {isRecording ? 'Recording…' : isProcessing ? 'Processing…' : 'Start Recording'}
+                  </button>
+                  <button
+                    onClick={stopRecording}
+                    disabled={!isRecording}
+                    className="flex-1 rounded-xl border border-[#1f1c16] px-4 py-2 text-sm font-semibold text-[#1f1c16] transition hover:bg-[#1f1c16] hover:text-[#f6e9cc] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#f6e9cc] dark:text-[#f6e9cc] dark:hover:bg-[#f6e9cc] dark:hover:text-[#1f1c16]"
+                  >
+                    Stop Recording
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 rounded-2xl border border-black/10 bg-white/80 p-6 shadow-[0_20px_60px_-50px_rgba(51,41,25,0.6)] backdrop-blur dark:border-white/10 dark:bg-[#15120d]/85">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-[#1f1c16] dark:text-[#f3e9d8]">Transcript</h2>
+                <span className="text-xs font-medium uppercase tracking-[0.2em] text-[#a08a68] dark:text-[#c1ab88]">
+                  Live
+                </span>
+              </div>
+              <p className="mt-4 min-h-[160px] whitespace-pre-wrap text-sm text-[#2a241b] dark:text-[#f0e6d5]">
+                {transcript || (isTranscribing ? 'Transcribing…' : 'No transcript yet.')}
+              </p>
+            </div>
+          </section>
+
+          <section className="flex flex-col gap-6">
+            <div className="rounded-2xl border border-black/10 bg-white/80 p-6 shadow-[0_20px_60px_-50px_rgba(51,41,25,0.6)] backdrop-blur dark:border-white/10 dark:bg-[#15120d]/85">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-[#1f1c16] dark:text-[#f3e9d8]">Output</h2>
+                  <p className="text-sm text-[#6b5a3f] dark:text-[#c8b7a0]">
+                    Switch between translation and summary views.
+                  </p>
+                </div>
+                <label className="flex flex-col gap-2 text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+                  Target Language
+                  <select
+                    value={targetLanguage}
+                    onChange={(event) => setTargetLanguage(event.target.value)}
+                    className="rounded-xl border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  >
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="it">Italian</option>
+                    <option value="pt">Portuguese</option>
+                    <option value="ja">Japanese</option>
+                    <option value="ko">Korean</option>
+                    <option value="zh-simplified">Chinese (Simplified)</option>
+                    <option value="zh-traditional">Chinese (Traditional)</option>
+                    <option value="ar">Arabic</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="mt-6 flex flex-wrap gap-2">
+                <button
+                  onClick={() => setActivePanel('translation')}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+                    activePanel === 'translation'
+                      ? 'bg-[#1f1c16] text-[#f6e9cc] dark:bg-[#f6e9cc] dark:text-[#1f1c16]'
+                      : 'border border-[#d7c7a7] text-[#6b5a3f] hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]'
+                  }`}
+                >
+                  Translation
+                </button>
+                <button
+                  onClick={() => setActivePanel('summary')}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+                    activePanel === 'summary'
+                      ? 'bg-[#1f1c16] text-[#f6e9cc] dark:bg-[#f6e9cc] dark:text-[#1f1c16]'
+                      : 'border border-[#d7c7a7] text-[#6b5a3f] hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]'
+                  }`}
+                >
+                  Summary
+                </button>
+              </div>
+
+              <div className="mt-6 min-h-[280px] rounded-xl border border-[#efe0c3] bg-white/60 p-4 text-sm text-[#2a241b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f0e6d5]">
+                {activePanel === 'translation' ? (
+                  <p className="whitespace-pre-wrap">
+                    {translation || 'Translation will appear here.'}
+                  </p>
+                ) : summary ? (
+                  <ReactMarkdown
+                    components={{
+                      ul: ({ node, ...props }) => (
+                        <ul className="list-disc list-inside space-y-1" {...props} />
+                      ),
+                      ol: ({ node, ...props }) => (
+                        <ol className="list-decimal list-inside space-y-1" {...props} />
+                      ),
+                      p: ({ node, ...props }) => <p className="mb-3" {...props} />,
+                      h1: ({ node, ...props }) => (
+                        <h1 className="text-lg font-semibold mb-2" {...props} />
+                      ),
+                      h2: ({ node, ...props }) => (
+                        <h2 className="text-base font-semibold mb-2" {...props} />
+                      ),
+                      h3: ({ node, ...props }) => (
+                        <h3 className="text-sm font-semibold mb-2" {...props} />
+                      )
+                    }}
+                  >
+                    {summary}
+                  </ReactMarkdown>
+                ) : (
+                  'Summary will appear here.'
+                )}
+              </div>
+            </div>
+          </section>
         </div>
       </main>
     </div>

@@ -16,7 +16,6 @@ Use concise, factual language. Do not add explanations. Do not include any place
 Preserve section spacing with a blank line between sections. Use the following format:
 
 # [Meeting Title]
-## [Date]  -  [Duration]
 
 ## ACTION ITEMS
 - [Action item]
