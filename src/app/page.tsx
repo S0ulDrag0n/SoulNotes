@@ -87,6 +87,8 @@ export default function Home() {
   const latestTargetLanguageRef = useRef('');
   const lastTranslatedTextRef = useRef('');
   const lastTranslationLanguageRef = useRef('');
+  const summarizeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSummarizedTextRef = useRef('');
 
   const sendAudioChunk = async (audioBlob: Blob) => {
     const formData = new FormData();
@@ -363,15 +365,18 @@ export default function Home() {
   // Stop recording
   // -------------------------------------------------------
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    setIsRecording(false);
+    setIsProcessing(false);
+
+    if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      setIsProcessing(false);
-      
+
       // Stop all tracks
       if (mediaRecorderRef.current.stream) {
         mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
       }
+
+      mediaRecorderRef.current = null;
     }
 
     if (isRealtime) {
@@ -493,6 +498,32 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    if (isRecording || !translation.trim()) {
+      return;
+    }
+
+    if (translation === lastSummarizedTextRef.current) {
+      return;
+    }
+
+    if (summarizeDebounceRef.current) {
+      clearTimeout(summarizeDebounceRef.current);
+    }
+
+    summarizeDebounceRef.current = setTimeout(() => {
+      lastSummarizedTextRef.current = translation;
+      summarize();
+    }, 800);
+
+    return () => {
+      if (summarizeDebounceRef.current) {
+        clearTimeout(summarizeDebounceRef.current);
+        summarizeDebounceRef.current = null;
+      }
+    };
+  }, [isRecording, translation]);
+
   // -------------------------------------------------------
   // UI rendering
   // -------------------------------------------------------
@@ -595,17 +626,35 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Summarize button & result */}
+        {/* Summary result */}
         <div className="mt-4 w-full">
-          <button
-            onClick={summarize}
-            disabled={!translation || isSummarizing}
-            className="flex items-center justify-center rounded-md px-4 py-2 bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
-          >
-            {isSummarizing ? 'Summarizing…' : 'Summarize Spanish Text'}
-          </button>
-          <div className="border rounded p-2 mt-2 bg-gray-100 dark:bg-gray-800 min-h-[60px]">
-            {summary ? <ReactMarkdown>{summary}</ReactMarkdown> : 'Summary will appear here.'}
+          <div className="border rounded p-2 mt-2 bg-gray-100 dark:bg-gray-800 min-h-[60px] leading-relaxed">
+            {summary ? (
+              <ReactMarkdown
+                components={{
+                  ul: ({ node, ...props }) => (
+                    <ul className="list-disc list-inside space-y-1" {...props} />
+                  ),
+                  ol: ({ node, ...props }) => (
+                    <ol className="list-decimal list-inside space-y-1" {...props} />
+                  ),
+                  p: ({ node, ...props }) => <p className="mb-3" {...props} />,
+                  h1: ({ node, ...props }) => (
+                    <h1 className="text-lg font-semibold mb-2" {...props} />
+                  ),
+                  h2: ({ node, ...props }) => (
+                    <h2 className="text-base font-semibold mb-2" {...props} />
+                  ),
+                  h3: ({ node, ...props }) => (
+                    <h3 className="text-sm font-semibold mb-2" {...props} />
+                  )
+                }}
+              >
+                {summary}
+              </ReactMarkdown>
+            ) : (
+              'Summary will appear here.'
+            )}
           </div>
         </div>
 

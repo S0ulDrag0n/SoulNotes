@@ -37,6 +37,9 @@ SPEACHES_TRANSCRIBE_LANGUAGE=zh
 # Ollama translation
 OLLAMA_BASE_URL=http://10.61.46.95:10102
 OLLAMA_TRANSLATE_MODEL=gemma3:12b
+
+# Ollama summarization
+OLLAMA_SUMMARIZE_MODEL=gemma3:12b
 ```
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
