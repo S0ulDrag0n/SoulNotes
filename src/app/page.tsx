@@ -369,6 +369,9 @@ export default function Home() {
   // -------------------------------------------------------
   const startRecording = async () => {
     try {
+      if (activePanel === 'summary') {
+        setActivePanel('translation');
+      }
       setTranscript('');
       setTranslation('');
       setSummary('');
@@ -460,6 +463,7 @@ export default function Home() {
 
     setIsRealtime(false);
     setIsTranscribing(false);
+    setActivePanel('summary');
   };
 
   // -------------------------------------------------------
@@ -698,6 +702,11 @@ export default function Home() {
                     Switch between translation and summary views.
                   </p>
                 </div>
+                {isSummarizing && (
+                  <span className="rounded-full border border-[#d7c7a7] bg-white/70 px-3 py-1 text-xs font-medium text-[#6b5a3f] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#cdbda6]">
+                    Summarizing…
+                  </span>
+                )}
                 <label className="flex flex-col gap-2 text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
                   Target Language
                   <select
