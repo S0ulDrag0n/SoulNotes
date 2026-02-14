@@ -38,8 +38,14 @@ export async function POST(req: Request) {
   const targetLabel = resolveLanguageLabel(targetLanguage);
   const prompt = `Translate the following text from ${sourceLabel} to ${targetLabel}. Translate as literally as possible. Preserve wording, order, repetition, fragments, and informal phrasing. Do not paraphrase or smooth the text. Do not add explanations or inferred meaning. Only return the translated text. Use clear paragraph breaks with a blank line between paragraphs.\n\n${text}`;
 
+  const ollamaHeaders: Record<string, string> = {};
+  if (process.env.OLLAMA_API_TOKEN) {
+    ollamaHeaders['Authorization'] = `Bearer ${process.env.OLLAMA_API_TOKEN}`;
+  }
+
   const ollama = new Ollama({
     host: process.env.OLLAMA_BASE_URL ?? 'http://10.61.46.95:10102',
+    headers: ollamaHeaders,
   });
 
   try {

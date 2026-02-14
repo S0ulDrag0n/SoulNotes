@@ -33,7 +33,7 @@ docker run --rm -p 3000:3000 \
 	-e SPEACHES_TRANSCRIBE_LANGUAGE=zh \
 	-e OLLAMA_BASE_URL=http://10.61.46.95:10102 \
 	-e OLLAMA_TRANSLATE_MODEL=aya-expanse:latest \
-	-e OLLAMA_SUMMARIZE_MODEL=gemma3:12b \
+	-e OLLAMA_SUMMARIZE_MODEL=phi4:latest \
 	soulnotes:latest
 ```
 
@@ -52,7 +52,7 @@ OLLAMA_BASE_URL=http://10.61.46.95:10102
 OLLAMA_TRANSLATE_MODEL=aya-expanse:latest
 
 # Ollama summarization
-OLLAMA_SUMMARIZE_MODEL=gemma3:12b
+OLLAMA_SUMMARIZE_MODEL=phi4:latest
 ```
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.

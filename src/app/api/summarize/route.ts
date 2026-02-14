@@ -43,20 +43,26 @@ RULES:
 CONTENT:
 ${text}`;
 
+  const ollamaHeaders: Record<string, string> = {};
+  if (process.env.OLLAMA_API_TOKEN) {
+    ollamaHeaders['Authorization'] = `Bearer ${process.env.OLLAMA_API_TOKEN}`;
+  }
+
   const ollama = new Ollama({
     host: process.env.OLLAMA_BASE_URL ?? 'http://10.61.46.95:10102',
+    headers: ollamaHeaders,
   });
 
   try {
     const response = await ollama.chat({
-      model: process.env.OLLAMA_SUMMARIZE_MODEL ?? 'gemma3:12b',
+      model: process.env.OLLAMA_SUMMARIZE_MODEL ?? 'phi4:latest',
       messages: [{ role: 'user', content: prompt }],
       stream: false,
       temperature: 0.3,
       num_predict: 2048,
       top_p: 0.9,
       top_k: 50,
-    });
+    } as any);
 
     return new Response(response.message.content ?? '', {
       headers: { 'Content-Type': 'text/plain' }
