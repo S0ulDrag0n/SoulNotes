@@ -1,75 +1,70 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SoulNotes
 
-## Getting Started
+Real-time speech transcription, translation, and summarization application.
 
-First, run the development server:
+## Features
+
+- **Live Speech Recognition** - Capture audio from your microphone in real-time
+- **Real-time Translation** - Translate speech on-the-fly as you speak
+- **Automatic Summarization** - Get structured meeting notes automatically
+- **Multi-language Support** - Support for English, Spanish, French, German, Italian, Portuguese, Japanese, Korean, Chinese, and Arabic
+- **Dark Mode** - Toggle between light and dark themes
+
+## Quick Start
 
 ```bash
+# Install dependencies
+npm install
+
+# Run development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Docker
 
-Build the image:
-
 ```bash
+# Build the image
 docker build -t soulnotes:latest .
-```
 
-Run with all supported parameters:
-
-```bash
+# Run the container
 docker run --rm -p 3000:3000 \
-	-e SPEACHES_BASE_URL=http://10.61.46.95:10300 \
-	-e SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
-	-e SPEACHES_TRANSCRIBE_LANGUAGE=zh \
-	-e OLLAMA_BASE_URL=http://10.61.46.95:10102 \
-	-e OLLAMA_TRANSLATE_MODEL=aya-expanse:latest \
-	-e OLLAMA_SUMMARIZE_MODEL=phi4:latest \
-	soulnotes:latest
+  -e SPEACHES_BASE_URL=http://10.61.46.95:10300 \
+  -e SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
+  -e SPEACHES_TRANSCRIBE_LANGUAGE=zh \
+  -e OLLAMA_BASE_URL=http://10.61.46.95:10102 \
+  -e OLLAMA_API_TOKEN=your_token_here \
+  -e OLLAMA_TRANSLATE_MODEL=aya-expanse:latest \
+  -e OLLAMA_SUMMARIZE_MODEL=phi4:latest \
+  soulnotes:latest
 ```
 
 ## Environment Variables
 
-Create a `.env.local` file and set any of the following if you need to override defaults:
+Create a `.env.local` file with the following variables:
 
-```bash
-# Speaches (realtime + fallback)
-SPEACHES_BASE_URL=http://10.61.46.95:10300
-SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3
-SPEACHES_TRANSCRIBE_LANGUAGE=zh
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SPEACHES_BASE_URL` | Speeches API endpoint | `http://10.61.46.95:10300` |
+| `SPEACHES_TRANSCRIBE_MODEL` | Transcription model | `Systran/faster-whisper-large-v3` |
+| `SPEACHES_TRANSCRIBE_LANGUAGE` | Source language code | `zh` |
+| `OLLAMA_BASE_URL` | Ollama API endpoint | `http://10.61.46.95:10102` |
+| `OLLAMA_API_TOKEN` | Ollama API token | (none) |
+| `OLLAMA_TRANSLATE_MODEL` | Translation model | `aya-expanse:latest` |
+| `OLLAMA_SUMMARIZE_MODEL` | Summarization model | `phi4:latest` |
 
-# Ollama translation
-OLLAMA_BASE_URL=http://10.61.46.95:10102
-OLLAMA_TRANSLATE_MODEL=aya-expanse:latest
+## API Endpoints
 
-# Ollama summarization
-OLLAMA_SUMMARIZE_MODEL=phi4:latest
-```
+- `POST /api/transcribe` - Transcribe audio file
+- `POST /api/translate` - Translate text between languages
+- `POST /api/summarize` - Summarize text content
+- `GET /api/config` - Get frontend configuration
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Usage
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Select the source language from the dropdown
+2. Click "Start Recording" to begin capturing audio
+3. Speak into your microphone - transcription appears in real-time
+4. Translation displays alongside the transcript
+5. Stop recording to generate a summary
