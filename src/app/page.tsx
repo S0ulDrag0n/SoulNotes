@@ -241,6 +241,37 @@ export default function Home() {
   const appendWithCleanup = (prev: string, next: string) =>
     normalizeTranslationText(appendWithSpacing(prev, next));
 
+  const triggerNextTranslate = () => {
+    if (inflightTranslatedTextRef.current) {
+      return;
+    }
+    const maxChunkLength = 180;
+    const { chunk, rest } = extractTranslatableChunk(
+      pendingTranslateBufferRef.current,
+      false,
+      true,
+      maxChunkLength
+    );
+    if (!chunk) {
+      pendingTranslateBufferRef.current = rest;
+      return;
+    }
+    pendingTranslateBufferRef.current = rest;
+
+    const requestId = translateRequestIdRef.current + 1;
+    translateRequestIdRef.current = requestId;
+    lastTranslateAtRef.current = Date.now();
+    inflightTranslatedTextRef.current = chunk;
+    translate(requestId, chunk, true).finally(() => {
+      if (inflightTranslatedTextRef.current === chunk) {
+        inflightTranslatedTextRef.current = '';
+        if (pendingTranslateBufferRef.current.trim()) {
+          triggerNextTranslate();
+        }
+      }
+    });
+  };
+
   const extractTranslatableChunk = (
     buffer: string,
     isIdle: boolean,
@@ -593,6 +624,10 @@ export default function Home() {
     } catch (err) {
       console.error(err);
       alert('Translation failed');
+    } finally {
+      if (!inflightTranslatedTextRef.current && pendingTranslateBufferRef.current.trim()) {
+        triggerNextTranslate();
+      }
     }
   };
 
@@ -628,7 +663,6 @@ export default function Home() {
       if (text.startsWith(lastSeenTranscriptRef.current)) {
         deltaText = text.slice(lastSeenTranscriptRef.current.length);
       } else {
-        lastTranslatedTextRef.current = '';
         pendingTranslateBufferRef.current = '';
         inflightTranslatedTextRef.current = '';
         deltaText = text;
@@ -665,6 +699,9 @@ export default function Home() {
       translate(requestId, chunk, true).finally(() => {
         if (inflightTranslatedTextRef.current === chunk) {
           inflightTranslatedTextRef.current = '';
+          if (pendingTranslateBufferRef.current.trim()) {
+            triggerNextTranslate();
+          }
         }
       });
     }, 1500);
