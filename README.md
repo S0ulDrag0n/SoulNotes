@@ -16,6 +16,33 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Docker
+
+Build the image:
+
+```bash
+docker build -t soulnotes:latest .
+```
+
+Run with all supported parameters:
+
+```bash
+docker run --rm -p 3000:3000 \
+	-e NEXT_PUBLIC_SPEACHES_REALTIME_URL= \
+	-e NEXT_PUBLIC_SPEACHES_REALTIME_SECURE=false \
+	-e NEXT_PUBLIC_SPEACHES_REALTIME_HOST=10.61.46.95:10300 \
+	-e NEXT_PUBLIC_SPEACHES_REALTIME_PATH=/v1/realtime \
+	-e NEXT_PUBLIC_SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
+	-e SPEACHES_BASE_URL=http://10.61.46.95:10300 \
+	-e SPEACHES_TRANSCRIBE_ENDPOINT=/v1/audio/transcriptions \
+	-e SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
+	-e SPEACHES_TRANSCRIBE_LANGUAGE=zh \
+	-e OLLAMA_BASE_URL=http://10.61.46.95:10102 \
+	-e OLLAMA_TRANSLATE_MODEL=gemma3:12b \
+	-e OLLAMA_SUMMARIZE_MODEL=gemma3:12b \
+	soulnotes:latest
+```
+
 ## Environment Variables
 
 Create a `.env.local` file and set any of the following if you need to override defaults:
