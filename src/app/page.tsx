@@ -90,13 +90,15 @@ export default function Home() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const translateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const translateRequestIdRef = useRef(0);
-  const translateAbortRef = useRef<AbortController | null>(null);
   const lastTranscriptUpdateRef = useRef(0);
+  const lastTranslateAtRef = useRef(0);
+  const lastSeenTranscriptRef = useRef('');
   const latestTranscriptRef = useRef('');
   const latestSourceLanguageRef = useRef('');
   const latestTargetLanguageRef = useRef('');
-  const lastTranslatedTextRef = useRef('');
+  const inflightTranslatedTextRef = useRef('');
   const lastTranslationLanguageRef = useRef('');
+  const pendingTranslateBufferRef = useRef('');
   const summarizeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSummarizedTextRef = useRef('');
   const languageTouchedRef = useRef(false);
@@ -206,6 +208,58 @@ export default function Home() {
 
   const scrollToBottom = (element: HTMLElement) => {
     element.scrollTop = element.scrollHeight;
+  };
+
+  const normalizeTranslationText = (text: string) =>
+    text
+      .replace(/[ \t]+([.,!?;:])/g, '$1')
+      .replace(/([A-Za-z])\s+(['])/g, '$1$2')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\s+\n/g, '\n')
+      .replace(/\n\s+/g, '\n');
+
+  const appendWithSpacing = (prev: string, next: string) => {
+    if (!prev) return next;
+    const prevEndsClean = /[\s\n.,!?;:，。！？；：)]$/.test(prev);
+    const nextStartsClean = /^[\s\n.,!?;:，。！？；：(]/.test(next);
+    if (prevEndsClean || nextStartsClean) {
+      return `${prev} ${next}`;
+    }
+    const prevEndsLatin = /[A-Za-z0-9)]$/.test(prev);
+    const nextStartsLatinUpper = /^[A-Z]/.test(next);
+    if (prevEndsLatin && nextStartsLatinUpper) {
+      return `${prev}. ${next}`;
+    }
+    const prevEndsCjk = /[\u4e00-\u9fff]$/.test(prev);
+    const nextStartsCjk = /^[\u4e00-\u9fff]/.test(next);
+    if (prevEndsCjk && nextStartsCjk) {
+      return `${prev}。${next}`;
+    }
+    return `${prev} ${next}`;
+  };
+
+  const appendWithCleanup = (prev: string, next: string) =>
+    normalizeTranslationText(appendWithSpacing(prev, next));
+
+  const extractTranslatableChunk = (
+    buffer: string,
+    isIdle: boolean,
+    intervalElapsed: boolean,
+    maxChunkLength: number
+  ) => {
+    const trimmed = buffer.replace(/^\s+/, '');
+    if (!trimmed) {
+      return { chunk: '', rest: '' };
+    }
+    if (!isIdle && !intervalElapsed) {
+      return { chunk: '', rest: trimmed };
+    }
+    if (isIdle) {
+      return { chunk: trimmed, rest: '' };
+    }
+    const chunk = trimmed.slice(0, maxChunkLength);
+    const rest = trimmed.slice(chunk.length).replace(/^\s+/, '');
+    return { chunk, rest };
   };
 
   useEffect(() => {
@@ -512,10 +566,7 @@ export default function Home() {
   // -------------------------------------------------------
   // Translate using backend API
   // -------------------------------------------------------
-  const translate = async (requestId: number, text: string) => {
-    translateAbortRef.current?.abort();
-    const controller = new AbortController();
-    translateAbortRef.current = controller;
+  const translate = async (requestId: number, text: string, shouldAppend: boolean) => {
     try {
       let hasStarted = false;
       await streamTextFromApi(
@@ -531,24 +582,17 @@ export default function Home() {
           }
           if (!hasStarted) {
             hasStarted = true;
-            setTranslation(chunk);
+            setTranslation((prev) =>
+              shouldAppend ? appendWithCleanup(prev, chunk) : normalizeTranslationText(chunk)
+            );
             return;
           }
-          setTranslation((prev) => prev + chunk);
-        },
-        controller.signal
+          setTranslation((prev) => appendWithCleanup(prev, chunk));
+        }
       );
     } catch (err) {
-      if (controller.signal.aborted) {
-        return;
-      }
       console.error(err);
       alert('Translation failed');
-    } finally {
-      if (translateAbortRef.current === controller) {
-        translateAbortRef.current = null;
-      }
-      // No UI flag needed for live translation
     }
   };
 
@@ -562,24 +606,67 @@ export default function Home() {
         return;
       }
 
-      if (Date.now() - lastTranscriptUpdateRef.current < 900) {
-        return;
-      }
+      const now = Date.now();
+      const isIdle = now - lastTranscriptUpdateRef.current >= 900;
+      const maxIntervalMs = 2500;
+      const intervalElapsed = now - lastTranslateAtRef.current >= maxIntervalMs;
 
       const languageKey = `${latestSourceLanguageRef.current}|${latestTargetLanguageRef.current}`;
       if (lastTranslationLanguageRef.current !== languageKey) {
         lastTranslationLanguageRef.current = languageKey;
-        lastTranslatedTextRef.current = '';
+        lastSeenTranscriptRef.current = '';
+        pendingTranslateBufferRef.current = '';
+        inflightTranslatedTextRef.current = '';
+        setTranslation('');
       }
 
-      if (text === lastTranslatedTextRef.current) {
+      if (text === lastSeenTranscriptRef.current) {
         return;
       }
 
+      let deltaText = '';
+      if (text.startsWith(lastSeenTranscriptRef.current)) {
+        deltaText = text.slice(lastSeenTranscriptRef.current.length);
+      } else {
+        lastTranslatedTextRef.current = '';
+        pendingTranslateBufferRef.current = '';
+        inflightTranslatedTextRef.current = '';
+        deltaText = text;
+        setTranslation('');
+      }
+
+      lastSeenTranscriptRef.current = text;
+
+      if (deltaText.trim()) {
+        pendingTranslateBufferRef.current += deltaText;
+      }
+
+      if (inflightTranslatedTextRef.current) {
+        return;
+      }
+
+      const maxChunkLength = 180;
+      const { chunk, rest } = extractTranslatableChunk(
+        pendingTranslateBufferRef.current,
+        isIdle,
+        intervalElapsed,
+        maxChunkLength
+      );
+      if (!chunk) {
+        pendingTranslateBufferRef.current = rest;
+        return;
+      }
+      pendingTranslateBufferRef.current = rest;
+
       const requestId = translateRequestIdRef.current + 1;
       translateRequestIdRef.current = requestId;
-      lastTranslatedTextRef.current = text;
-      translate(requestId, text);
+      lastTranslateAtRef.current = now;
+      inflightTranslatedTextRef.current = chunk;
+      translate(requestId, chunk, true).finally(() => {
+        if (inflightTranslatedTextRef.current === chunk) {
+          inflightTranslatedTextRef.current = '';
+        }
+      });
     }, 1500);
 
     return () => {
