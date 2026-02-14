@@ -47,7 +47,11 @@ export async function POST(req: Request) {
       model: process.env.OLLAMA_TRANSLATE_MODEL ?? 'aya-expanse:latest',
       messages: [{ role: 'user', content: prompt }],
       stream: true,
-    });
+      temperature: 0.3,
+      num_predict: 2048,
+      top_p: 0.9,
+      top_k: 50,
+    } as any);
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({

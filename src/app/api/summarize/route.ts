@@ -11,12 +11,9 @@ export async function POST(req: Request) {
     return new Response('Missing text', { status: 400 });
   }
 
-  const prompt = `Summarize the following content using Markdown and the exact format and headings below.
-Use concise, factual language. Do not add explanations. Do not include any placeholders like [Meeting Title].
-If a field is unknown, try to guess, or if you not sure, omit that line entirely.
-Each bullet should be 1-2 sentences with concrete details (avoid one-word fragments). Do not write paragraph blocks.
-Preserve section spacing with a blank line between sections. Use the following format:
+  const prompt = `SUMMARIZE THE FOLLOWING CONTENT IN EXACTLY THE SAME FORMAT AND STRUCTURE SHOWN BELOW. DO NOT ADD ANY TEXT BEFORE OR AFTER THE SUMMARY.
 
+FORMAT (MUST FOLLOW EXACTLY):
 # [Meeting Title]
 
 ## ACTION ITEMS
@@ -35,6 +32,14 @@ Preserve section spacing with a blank line between sections. Use the following f
 ### Next Steps
 - [Next step]
 
+RULES:
+- Use concise, factual language - no fluff or explanations
+- Each bullet should be 1-2 sentences with concrete details
+- Do not include placeholder text like [Meeting Title] - use actual content
+- If a field is unknown, omit that section entirely
+- Preserve exact section spacing with blank lines between sections
+- Output ONLY the summary in the exact format - no other text
+
 CONTENT:
 ${text}`;
 
@@ -47,6 +52,10 @@ ${text}`;
       model: process.env.OLLAMA_SUMMARIZE_MODEL ?? 'gemma3:12b',
       messages: [{ role: 'user', content: prompt }],
       stream: false,
+      temperature: 0.3,
+      num_predict: 2048,
+      top_p: 0.9,
+      top_k: 50,
     });
 
     return new Response(response.message.content ?? '', {
