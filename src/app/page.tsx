@@ -96,6 +96,10 @@ export default function Home() {
   const summarizeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSummarizedTextRef = useRef('');
   const languageTouchedRef = useRef(false);
+  const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+  const outputScrollRef = useRef<HTMLDivElement | null>(null);
+  const transcriptAutoScrollRef = useRef(true);
+  const outputAutoScrollRef = useRef(true);
 
   const sendAudioChunk = async (audioBlob: Blob) => {
     const formData = new FormData();
@@ -188,6 +192,37 @@ export default function Home() {
     document.cookie = `theme=${value}; path=/; max-age=31536000`;
     document.documentElement.classList.toggle('dark', isDarkMode);
   }, [isDarkMode]);
+
+  const isNearBottom = (element: HTMLElement, threshold = 48) =>
+    element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+
+  const scrollToBottom = (element: HTMLElement) => {
+    element.scrollTop = element.scrollHeight;
+  };
+
+  useEffect(() => {
+    const element = transcriptScrollRef.current;
+    if (!element) return;
+    if (transcriptAutoScrollRef.current) {
+      scrollToBottom(element);
+    }
+  }, [transcript, isTranscribing]);
+
+  useEffect(() => {
+    const element = outputScrollRef.current;
+    if (!element) return;
+    if (activePanel === 'translation' && translation.trim()) {
+      if (outputAutoScrollRef.current) {
+        scrollToBottom(element);
+      }
+      return;
+    }
+    if (activePanel === 'summary' && summary.trim()) {
+      if (outputAutoScrollRef.current) {
+        scrollToBottom(element);
+      }
+    }
+  }, [activePanel, translation, summary, isSummarizing]);
 
   const buildSessionInstructions = () => {
     let extraInstructions = '';
@@ -687,9 +722,18 @@ export default function Home() {
                   Live
                 </span>
               </div>
-              <p className="mt-4 min-h-[160px] max-h-[min(45vh,360px)] overflow-auto whitespace-pre-wrap text-sm text-[#2a241b] dark:text-[#f0e6d5]">
-                {transcript || (isTranscribing ? 'Transcribing…' : 'No transcript yet.')}
-              </p>
+              <div
+                ref={transcriptScrollRef}
+                onScroll={(event) => {
+                  const element = event.currentTarget;
+                  transcriptAutoScrollRef.current = isNearBottom(element);
+                }}
+                className="mt-4 min-h-[160px] max-h-[min(45vh,360px)] overflow-auto text-sm text-[#2a241b] dark:text-[#f0e6d5]"
+              >
+                <p className="whitespace-pre-wrap">
+                  {transcript || (isTranscribing ? 'Transcribing…' : 'No transcript yet.')}
+                </p>
+              </div>
             </div>
           </section>
 
@@ -752,7 +796,14 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className="mt-6 min-h-[280px] max-h-[min(55vh,520px)] overflow-auto rounded-xl border border-[#efe0c3] bg-white/60 p-4 text-sm text-[#2a241b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f0e6d5]">
+              <div
+                ref={outputScrollRef}
+                onScroll={(event) => {
+                  const element = event.currentTarget;
+                  outputAutoScrollRef.current = isNearBottom(element);
+                }}
+                className="mt-6 min-h-[280px] max-h-[min(55vh,520px)] overflow-auto rounded-xl border border-[#efe0c3] bg-white/60 p-4 text-sm text-[#2a241b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f0e6d5]"
+              >
                 {activePanel === 'translation' ? (
                   <p className="whitespace-pre-wrap">
                     {translation || 'Translation will appear here.'}
