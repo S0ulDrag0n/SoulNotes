@@ -13,6 +13,7 @@ export async function POST(req: Request) {
 
   const prompt = `Summarize the following content using Markdown and the exact format and headings below.
 Use concise, factual language. Do not add explanations. Do not include any placeholders like [Meeting Title]. If a field is unknown, omit that line entirely.
+Each bullet should be 1-2 sentences with concrete details (avoid one-word fragments). Do not write paragraph blocks.
 Preserve section spacing with a blank line between sections. Use the following format:
 
 # [Meeting Title]
