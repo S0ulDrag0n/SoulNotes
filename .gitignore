@@ -38,3 +38,14 @@ SoulNotes.exe
 # Build generated files
 .next/
 out/
+
+# Cargo/Rust
+Cargo.lock
+target/
+
+# Test files
+test-tauri-backend.js
+
+# Tauri config and test files
+src-tauri/config*.yml
+src-tauri/src/test_translate.rs

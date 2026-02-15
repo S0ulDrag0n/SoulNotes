@@ -1,15 +1,30 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
+use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
+use reqwest;
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
 struct AudioChunk {
     data: Vec<u8>,
     sample_rate: u32,
     channels: u16,
     source: String, // "mic" or "system"
+}
+
+// Config structure for YAML file
+#[derive(Clone, serde::Serialize, serde::Deserialize, Debug, Default)]
+pub struct AppConfig {
+    pub speaches_base_url: Option<String>,
+    pub speaches_transcribe_model: Option<String>,
+    pub speaches_transcribe_language: Option<String>,
+    pub ollama_base_url: Option<String>,
+    pub ollama_api_token: Option<String>,
+    pub ollama_translate_model: Option<String>,
+    pub ollama_summarize_model: Option<String>,
 }
 
 // State for dual audio capture
@@ -18,11 +33,53 @@ struct AudioState {
     system_stream: Mutex<Option<Stream>>,
     is_recording: AtomicBool,
     capture_mode: Mutex<String>, // "mic", "system", "dual"
+    config: Mutex<AppConfig>,
 }
 
 // Safe wrapper for Stream since cpal Stream is not Send/Sync
 unsafe impl Send for AudioState {}
 unsafe impl Sync for AudioState {}
+
+// Helper to get config file path - use local directory (next to executable)
+fn get_config_path(_app_handle: &AppHandle) -> PathBuf {
+    // Try to get the executable's directory
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            return exe_dir.join("config.yml");
+        }
+    }
+    // Fallback to current working directory
+    PathBuf::from("config.yml")
+}
+
+// Load config from YAML file
+fn load_config(app_handle: &AppHandle) -> AppConfig {
+    let config_path = get_config_path(app_handle);
+    log::info!("Loading config from: {:?}", config_path);
+    
+    if config_path.exists() {
+        match fs::read_to_string(&config_path) {
+            Ok(content) => {
+                match serde_yaml::from_str::<AppConfig>(&content) {
+                    Ok(config) => {
+                        log::info!("Loaded config: {:?}", config);
+                        return config;
+                    }
+                    Err(e) => {
+                        log::error!("Failed to parse config YAML: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to read config file: {}", e);
+            }
+        }
+    } else {
+        log::info!("Config file not found, using defaults");
+    }
+    
+    AppConfig::default()
+}
 
 #[tauri::command]
 fn get_audio_devices() -> Result<Vec<(String, String)>, String> {
@@ -240,6 +297,254 @@ fn get_capture_mode(app: AppHandle) -> String {
     mode
 }
 
+// Get config from YAML file
+#[tauri::command]
+fn get_config(app: AppHandle) -> AppConfig {
+    let state = app.state::<AudioState>();
+    let config = state.config.lock().unwrap().clone();
+    config
+}
+
+// Save config to YAML file
+#[tauri::command]
+fn save_config(app: AppHandle, config: AppConfig) -> Result<(), String> {
+    let config_path = get_config_path(&app);
+    
+    // Ensure directory exists
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    
+    // Serialize and write config
+    let yaml = serde_yaml::to_string(&config).map_err(|e| e.to_string())?;
+    fs::write(&config_path, yaml).map_err(|e| e.to_string())?;
+    
+    // Update in-memory config
+    let state = app.state::<AudioState>();
+    *state.config.lock().unwrap() = config;
+    
+    log::info!("Config saved to: {:?}", config_path);
+    Ok(())
+}
+
+// Get default config values
+#[tauri::command]
+fn get_default_config() -> AppConfig {
+    AppConfig {
+        speaches_base_url: Some("http://10.61.46.95:10300".to_string()),
+        speaches_transcribe_model: Some("Systran/faster-whisper-large-v3".to_string()),
+        speaches_transcribe_language: Some("zh".to_string()),
+        ollama_base_url: Some("http://10.61.46.95:10102".to_string()),
+        ollama_api_token: None,
+        ollama_translate_model: Some("aya-expanse:latest".to_string()),
+        ollama_summarize_model: Some("phi4:latest".to_string()),
+    }
+}
+
+// Translate text using Ollama - direct connection
+#[tauri::command]
+async fn translate_text(
+    app: AppHandle,
+    text: String,
+    source_language: String,
+    target_language: String,
+) -> Result<String, String> {
+    let state = app.state::<AudioState>();
+    let config = state.config.lock().unwrap().clone();
+    
+    // Use env var, config file, or default for Ollama settings
+    let base_url = std::env::var("OLLAMA_BASE_URL")
+        .ok()
+        .or(config.ollama_base_url)
+        .unwrap_or_else(|| "http://10.61.46.95:10102".to_string());
+    
+    let model = std::env::var("OLLAMA_TRANSLATE_MODEL")
+        .ok()
+        .or(config.ollama_translate_model)
+        .unwrap_or_else(|| "aya-expanse:latest".to_string());
+    
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/chat", base_url);
+    
+    // Language labels mapping
+    let language_labels = [
+        ("en", "English"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("it", "Italian"),
+        ("pt", "Portuguese"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("ar", "Arabic"),
+        ("zh", "Chinese"),
+        ("zh-simplified", "Simplified Chinese"),
+        ("zh-traditional", "Traditional Chinese"),
+    ];
+    
+    let source_label = language_labels.iter()
+        .find(|&&(code, _)| code == source_language)
+        .map(|&(_, label)| label)
+        .unwrap_or(&source_language);
+        
+    let target_label = language_labels.iter()
+        .find(|&&(code, _)| code == target_language)
+        .map(|&(_, label)| label)
+        .unwrap_or(&target_language);
+    
+    // Create prompt for translation
+    let prompt = format!(
+        "Translate the following text from {} to {}. Translate as literally as possible. Preserve wording, order, repetition, fragments, and informal phrasing. Do not paraphrase or smooth the text. Do not add explanations or inferred meaning. Only return the translated text. Use clear paragraph breaks with a blank line between paragraphs.\n\n{}",
+        source_label, target_label, text
+    );
+    
+    let mut request_builder = client
+        .post(&url)
+        .header("Content-Type", "application/json");
+        
+    // Add authorization header if token is provided (env var or config)
+    if let Some(token) = std::env::var("OLLAMA_API_TOKEN").ok().or(config.ollama_api_token) {
+        request_builder = request_builder.header("Authorization", format!("Bearer {}", token));
+    }
+    
+    // Use chat/completions format with messages array
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": false,
+        "temperature": 0.3,
+        "num_predict": 2048,
+        "top_p": 0.9,
+        "top_k": 50,
+    });
+    
+    let response = request_builder
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Translation request failed: {}", e))?;
+    
+    // Check status
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Translation API error: {} - {}", status, error_text));
+    }
+    
+    let json_response: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    
+    // Extract translated text from response
+    let translated_text = json_response
+        .get("message")
+        .and_then(|msg| msg.get("content"))
+        .and_then(|content| content.as_str())
+        .unwrap_or("")
+        .to_string();
+        
+    Ok(translated_text)
+}
+
+// Summarize text using Ollama - direct connection
+#[tauri::command]
+async fn summarize_text(app: AppHandle, text: String) -> Result<String, String> {
+    let state = app.state::<AudioState>();
+    let config = state.config.lock().unwrap().clone();
+    
+    // Use env var, config file, or default for Ollama settings
+    let base_url = std::env::var("OLLAMA_BASE_URL")
+        .ok()
+        .or(config.ollama_base_url)
+        .unwrap_or_else(|| "http://10.61.46.95:10102".to_string());
+    
+    let model = std::env::var("OLLAMA_SUMMARIZE_MODEL")
+        .ok()
+        .or(config.ollama_summarize_model)
+        .unwrap_or_else(|| "phi4:latest".to_string());
+    
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/chat", base_url);
+    
+    // Create prompt for summarization
+    let prompt = format!("SUMMARIZE THE FOLLOWING CONTENT IN EXACTLY THE SAME FORMAT AND STRUCTURE SHOWN BELOW. DO NOT ADD ANY TEXT BEFORE OR AFTER THE SUMMARY.
+
+FORMAT (MUST FOLLOW EXACTLY):
+# [Meeting Title]
+
+## ACTION ITEMS
+- [Action item]
+
+## MEETING SUMMARY
+### Meeting Purpose
+[Purpose]
+
+### Key Takeaways
+- [Takeaway]
+
+### Topics
+- [Topic]
+
+### Next Steps
+- [Next step]
+
+RULES:
+- Use concise, factual language - no fluff or explanations
+- Each bullet should be 1-2 sentences with concrete details
+- Do not include placeholder text like [Meeting Title] - use actual content
+- If a field is unknown, omit that section entirely
+- Preserve exact section spacing with blank lines between sections
+- Output ONLY the summary in the exact format - no other text
+
+CONTENT:
+{}", text);
+    
+    let mut request_builder = client
+        .post(&url)
+        .header("Content-Type", "application/json");
+        
+    // Add authorization header if token is provided (env var or config)
+    if let Some(token) = std::env::var("OLLAMA_API_TOKEN").ok().or(config.ollama_api_token) {
+        request_builder = request_builder.header("Authorization", format!("Bearer {}", token));
+    }
+    
+    // Use chat/completions format with messages array
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": false,
+        "temperature": 0.1,
+        "num_predict": 2048,
+    });
+    
+    let response = request_builder
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Summarization request failed: {}", e))?;
+    
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Summarization API error: {} - {}", status, error_text));
+    }
+    
+    let json_response: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    
+    let summary = json_response
+        .get("message")
+        .and_then(|msg| msg.get("content"))
+        .and_then(|content| content.as_str())
+        .unwrap_or("")
+        .to_string();
+        
+    Ok(summary)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -248,8 +553,14 @@ pub fn run() {
         system_stream: Mutex::new(None),
         is_recording: AtomicBool::new(false),
         capture_mode: Mutex::new(String::new()),
+        config: Mutex::new(AppConfig::default()),
     })
     .setup(|app| {
+        // Load config from YAML file
+        let config = load_config(app.handle());
+        let state = app.state::<AudioState>();
+        *state.config.lock().unwrap() = config;
+        
         if cfg!(debug_assertions) {
         app.handle().plugin(
             tauri_plugin_log::Builder::default()
@@ -259,6 +570,7 @@ pub fn run() {
         }
         Ok(())
     })
+    .plugin(tauri_plugin_http::init())
     .invoke_handler(tauri::generate_handler![
         get_audio_devices,
         get_system_audio_devices,
@@ -267,6 +579,11 @@ pub fn run() {
         stop_audio_capture,
         is_recording,
         get_capture_mode,
+        get_config,
+        save_config,
+        get_default_config,
+        translate_text,
+        summarize_text,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

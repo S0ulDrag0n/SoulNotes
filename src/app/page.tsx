@@ -78,7 +78,7 @@ export default function Home() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   
   // Audio source selection (Tauri only)
-  const [audioSourceType, setAudioSourceType] = useState<'microphone' | 'system' | 'dual'>('microphone');
+  const [audioSourceType, setAudioSourceType] = useState<'microphone' | 'system' | 'dual'>('dual');
   const [micDevices, setMicDevices] = useState<{id: string, name: string}[]>([]);
   const [systemDevices, setSystemDevices] = useState<{id: string, name: string}[]>([]);
   const [selectedMicDevice, setSelectedMicDevice] = useState<string>('');
@@ -92,9 +92,9 @@ export default function Home() {
 // Load audio devices on mount (Tauri only)
   useEffect(() => {
     const checkTauri = async () => {
-      // Method 1: Check for Tauri global
+      // Method 1: Check for Tauri global - this is the most reliable check
       const hasTauriGlobal = typeof window !== 'undefined' && '__TAURI__' in window;
-      console.log('Tauri detection step 1 - global:', hasTauriGlobal);
+      console.log('Tauri detection - global present:', hasTauriGlobal);
       
       if (!hasTauriGlobal) {
         console.log('Not running in Tauri mode - no global');
@@ -102,19 +102,17 @@ export default function Home() {
         return;
       }
       
-      // Method 2: Try to invoke a simple command to verify Tauri is working
-      console.log('Tauri detection step 2 - trying invoke...');
+      // Tauri global is present - set mode to true immediately since global exists
+      // We'll verify with invoke, but don't wait for it to set the mode
+      setIsDesktopMode(true);
+      console.log('Tauri global found - desktop mode enabled');
       
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         
-        // Test invoke with a simple command
-        await invoke('get_audio_devices');
-        console.log('Tauri detection step 2 - invoke works!');
-        
-        // Invoke works, we're in Tauri mode
-        console.log('Tauri mode confirmed via invoke');
-        setIsDesktopMode(true);
+        // Try to get config - this verifies Tauri commands work
+        const config = await invoke<any>('get_default_config');
+        console.log('Tauri invoke works! Config:', config);
         
         // Get mic devices
         const micDevicesResult = await invoke<[string, string][]>('get_audio_devices');
@@ -130,19 +128,16 @@ export default function Home() {
           setSelectedSystemDevice(systemDevicesResult[0][0]);
         }
         
-        console.log('Tauri mode enabled, devices loaded:', { micDevices: micDevicesResult.length, systemDevices: systemDevicesResult.length });
+        console.log('Desktop mode fully initialized with audio devices');
       } catch (err) {
-        console.error('Tauri invoke test failed:', err);
-        // Global exists but invoke doesn't work - might be CSP or other issue
-        console.log('Not running in Tauri mode - invoke failed');
-        setIsDesktopMode(false);
+        console.error('Tauri invoke error (but desktop mode still active):', err);
+        // Desktop mode stays true because __TAURI__ global exists
+        // The error might be due to commands not being available yet
       }
     };
     
-    // Run detection after a short delay to ensure Tauri is initialized
-    const timer = setTimeout(checkTauri, 1000);
-    
-    return () => clearTimeout(timer);
+    // Run detection immediately - no delay needed since we check global first
+    checkTauri();
   }, []);
 
   const [realtimeConfig, setRealtimeConfig] = useState({
@@ -169,12 +164,18 @@ export default function Home() {
   const lastTranslationLanguageRef = useRef('');
   const pendingTranslateBufferRef = useRef('');
   const summarizeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSummarizedTextRef = useRef('');
+const lastSummarizedTextRef = useRef('');
   const languageTouchedRef = useRef(false);
   const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
   const outputScrollRef = useRef<HTMLDivElement | null>(null);
   const transcriptAutoScrollRef = useRef(true);
   const outputAutoScrollRef = useRef(true);
+  
+  // Use ref for isDesktopMode so the translate interval can access current value
+  const isDesktopModeRef = useRef(false);
+  useEffect(() => {
+    isDesktopModeRef.current = isDesktopMode;
+  }, [isDesktopMode]);
 
   const sendAudioChunk = async (audioBlob: Blob) => {
     const formData = new FormData();
@@ -663,33 +664,58 @@ export default function Home() {
     setActivePanel('summary');
   };
 
-  // -------------------------------------------------------
-  // Translate using backend API
+// -------------------------------------------------------
+  // Translate using backend API or Tauri invoke (desktop mode)
   // -------------------------------------------------------
   const translate = async (requestId: number, text: string, shouldAppend: boolean) => {
     try {
       let hasStarted = false;
-      await streamTextFromApi(
-        '/api/translate',
-        {
+      
+      // Use ref for current value to avoid stale closure issues
+      if (isDesktopModeRef.current) {
+        console.log('Using Tauri invoke for translation');
+        // Use Tauri invoke for translation in desktop mode
+        const { invoke } = await import('@tauri-apps/api/core');
+        const result = await invoke<string>('translate_text', {
           text,
           sourceLanguage: latestSourceLanguageRef.current,
           targetLanguage: latestTargetLanguageRef.current
-        },
-        (chunk) => {
-          if (translateRequestIdRef.current !== requestId) {
-            return;
-          }
-          if (!hasStarted) {
-            hasStarted = true;
-            setTranslation((prev) =>
-              shouldAppend ? appendWithCleanup(prev, chunk) : normalizeTranslationText(chunk)
-            );
-            return;
-          }
-          setTranslation((prev) => appendWithCleanup(prev, chunk));
+        });
+        
+        if (translateRequestIdRef.current !== requestId) {
+          return;
         }
-      );
+        
+        console.log('Translation result:', result.substring(0, 100));
+        const chunk = result;
+        setTranslation((prev) =>
+          shouldAppend ? appendWithCleanup(prev, chunk) : normalizeTranslationText(chunk)
+        );
+      } else {
+        console.log('Using web API for translation');
+        // Use web API in browser mode
+        await streamTextFromApi(
+          '/api/translate',
+          {
+            text,
+            sourceLanguage: latestSourceLanguageRef.current,
+            targetLanguage: latestTargetLanguageRef.current
+          },
+          (chunk) => {
+            if (translateRequestIdRef.current !== requestId) {
+              return;
+            }
+            if (!hasStarted) {
+              hasStarted = true;
+              setTranslation((prev) =>
+                shouldAppend ? appendWithCleanup(prev, chunk) : normalizeTranslationText(chunk)
+              );
+              return;
+            }
+            setTranslation((prev) => appendWithCleanup(prev, chunk));
+          }
+        );
+      }
     } catch (err) {
       console.error(err);
       alert('Translation failed');
@@ -784,16 +810,26 @@ export default function Home() {
   }, []);
 
   // -------------------------------------------------------
-  // Summarize using backend API
+  // Summarize using backend API or Tauri invoke (desktop mode)
   // -------------------------------------------------------
   const summarize = async () => {
     if (!translation) return;
     setIsSummarizing(true);
     setSummary('');
     try {
-      await streamTextFromApi('/api/summarize', { text: translation }, (chunk) =>
-        setSummary((prev) => prev + chunk)
-      );
+      if (isDesktopMode) {
+        // Use Tauri invoke for summarization in desktop mode
+        const { invoke } = await import('@tauri-apps/api/core');
+        const result = await invoke<string>('summarize_text', {
+          text: translation
+        });
+        setSummary(result);
+      } else {
+        // Use web API in browser mode
+        await streamTextFromApi('/api/summarize', { text: translation }, (chunk) =>
+          setSummary((prev) => prev + chunk)
+        );
+      }
     } catch (err) {
       console.error(err);
       alert('Summarization failed');
