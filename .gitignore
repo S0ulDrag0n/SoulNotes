@@ -29,6 +29,12 @@ Thumbs.db
 
 # Tauri build output
 src-tauri/target/
+src-tauri/target/release/
+src-tauri/target/debug/
 
 # Build artifacts
 SoulNotes.exe
+
+# Build generated files
+.next/
+out/
