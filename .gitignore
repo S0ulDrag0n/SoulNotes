@@ -26,3 +26,9 @@ Thumbs.db
 .vscode/
 *.sublime-project
 *.sublime-workspace
+
+# Tauri build output
+src-tauri/target/
+
+# Build artifacts
+SoulNotes.exe

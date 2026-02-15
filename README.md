@@ -9,8 +9,9 @@ Real-time speech transcription, translation, and summarization application.
 - **Automatic Summarization** - Get structured meeting notes automatically
 - **Multi-language Support** - Support for English, Spanish, French, German, Italian, Portuguese, Japanese, Korean, Chinese, and Arabic
 - **Dark Mode** - Toggle between light and dark themes
+- **Desktop App** - Standalone Windows executable (Tauri)
 
-## Quick Start
+## Quick Start (Web)
 
 ```bash
 # Install dependencies
@@ -21,6 +22,44 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## Desktop App (Tauri)
+
+### Prerequisites
+
+- **Node.js** 18+ 
+- **Rust** 1.70+ (install via [rustup](https://rustup.rs/))
+- **Visual Studio Build Tools** (Windows) - for compiling Rust dependencies
+
+### Build Commands
+
+```bash
+# Install dependencies
+npm install
+
+# Build Tauri desktop app (production)
+npm run tauri:build
+
+# Or for development mode (with hot reload)
+npm run tauri:dev
+```
+
+### Output Files
+
+After building, the following files are generated:
+- **Executable:** `src-tauri/target/release/app.exe`
+- **MSI Installer:** `src-tauri/target/release/bundle/msi/SoulNotes_0.1.0_x64_en-US.msi`
+- **NSIS Installer:** `src-tauri/target/release/bundle/nsis/SoulNotes_0.1.0_x64-setup.exe`
+
+### Build Process
+
+The build process:
+1. Runs `next build` to create the Next.js production build
+2. Copies static assets (CSS, fonts) to the correct location via `scripts/copy-static.js`
+3. Compiles the Tauri Rust backend
+4. Bundles everything into a standalone Windows executable
+
+> **Note:** First build may take 5-10 minutes as Rust compiles all dependencies. Subsequent builds are much faster.
 
 ## Docker
 
