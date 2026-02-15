@@ -8,8 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "tauri": "tauri",
-    "tauri:dev": "set TAURI=true&&tauri dev",
-    "tauri:build": "set TAURI=true&&tauri build"
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0",

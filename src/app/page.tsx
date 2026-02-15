@@ -4,9 +4,6 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 
-// Check if running in Tauri (from environment variable)
-const isTauri = process.env.isTauri === 'true';
-
 // -----------------------------------------------------------------------------
 // Helper function to call backend APIs
 // -----------------------------------------------------------------------------
@@ -81,11 +78,73 @@ export default function Home() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   
   // Audio source selection (Tauri only)
-  const [audioSourceType, setAudioSourceType] = useState<'microphone' | 'system'>('microphone');
-  const [audioDevices, setAudioDevices] = useState<string[]>([]);
-  const [selectedDevice, setSelectedDevice] = useState<string>('');
+  const [audioSourceType, setAudioSourceType] = useState<'microphone' | 'system' | 'dual'>('microphone');
+  const [micDevices, setMicDevices] = useState<{id: string, name: string}[]>([]);
+  const [systemDevices, setSystemDevices] = useState<{id: string, name: string}[]>([]);
+  const [selectedMicDevice, setSelectedMicDevice] = useState<string>('');
+  const [selectedSystemDevice, setSelectedSystemDevice] = useState<string>('');
   const [isDesktopMode, setIsDesktopMode] = useState(false);
+  const [desktopRecording, setDesktopRecording] = useState(false);
   
+  // Tauri event listener refs
+  const audioChunkRef = useRef<{source: string, data: number[], sampleRate: number, channels: number}[]>([]);
+  
+// Load audio devices on mount (Tauri only)
+  useEffect(() => {
+    const checkTauri = async () => {
+      // Method 1: Check for Tauri global
+      const hasTauriGlobal = typeof window !== 'undefined' && '__TAURI__' in window;
+      console.log('Tauri detection step 1 - global:', hasTauriGlobal);
+      
+      if (!hasTauriGlobal) {
+        console.log('Not running in Tauri mode - no global');
+        setIsDesktopMode(false);
+        return;
+      }
+      
+      // Method 2: Try to invoke a simple command to verify Tauri is working
+      console.log('Tauri detection step 2 - trying invoke...');
+      
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        
+        // Test invoke with a simple command
+        await invoke('get_audio_devices');
+        console.log('Tauri detection step 2 - invoke works!');
+        
+        // Invoke works, we're in Tauri mode
+        console.log('Tauri mode confirmed via invoke');
+        setIsDesktopMode(true);
+        
+        // Get mic devices
+        const micDevicesResult = await invoke<[string, string][]>('get_audio_devices');
+        setMicDevices(micDevicesResult.map(([id, name]) => ({ id, name })));
+        if (micDevicesResult.length > 0) {
+          setSelectedMicDevice(micDevicesResult[0][0]);
+        }
+        
+        // Get system audio devices
+        const systemDevicesResult = await invoke<[string, string][]>('get_system_audio_devices');
+        setSystemDevices(systemDevicesResult.map(([id, name]) => ({ id, name })));
+        if (systemDevicesResult.length > 0) {
+          setSelectedSystemDevice(systemDevicesResult[0][0]);
+        }
+        
+        console.log('Tauri mode enabled, devices loaded:', { micDevices: micDevicesResult.length, systemDevices: systemDevicesResult.length });
+      } catch (err) {
+        console.error('Tauri invoke test failed:', err);
+        // Global exists but invoke doesn't work - might be CSP or other issue
+        console.log('Not running in Tauri mode - invoke failed');
+        setIsDesktopMode(false);
+      }
+    };
+    
+    // Run detection after a short delay to ensure Tauri is initialized
+    const timer = setTimeout(checkTauri, 1000);
+    
+    return () => clearTimeout(timer);
+  }, []);
+
   const [realtimeConfig, setRealtimeConfig] = useState({
     baseUrl: 'http://10.61.46.95:10300',
     transcribeModel: 'Systran/faster-whisper-large-v3',
@@ -796,6 +855,11 @@ export default function Home() {
             >
               {isDarkMode ? 'Light Mode' : 'Dark Mode'}
             </button>
+            {isDesktopMode && (
+              <span className="rounded-full border border-green-500/50 bg-green-500/10 px-3 py-1 text-xs font-medium text-green-700 dark:border-green-400/50 dark:bg-green-400/10 dark:text-green-400">
+                Desktop Mode
+              </span>
+            )}
             <span className="rounded-full border border-[#d7c7a7] bg-white/70 px-3 py-1 text-xs font-medium text-[#6b5a3f] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#cdbda6]">
               {isRealtime ? 'Realtime' : 'Fallback'}
             </span>
@@ -854,8 +918,8 @@ export default function Home() {
                 </label>
                 
                 {/* Audio Source Selector - Only show in Tauri/Desktop mode */}
-                {isTauri && (
-                  <div className="flex flex-col gap-2">
+{isDesktopMode && (
+                  <div className="flex flex-col gap-3">
                     <label className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
                       Audio Source
                     </label>
@@ -869,7 +933,7 @@ export default function Home() {
                             : 'border border-[#d7c7a7] text-[#6b5a3f] hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]'
                         }`}
                       >
-                        🎤 Microphone
+                        🎤 Mic
                       </button>
                       <button
                         type="button"
@@ -880,13 +944,72 @@ export default function Home() {
                             : 'border border-[#d7c7a7] text-[#6b5a3f] hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]'
                         }`}
                       >
-                        🔊 System Audio
+                        🔊 System
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAudioSourceType('dual')}
+                        className={`flex-1 rounded-xl px-3 py-2 text-xs font-medium transition ${
+                          audioSourceType === 'dual'
+                            ? 'bg-[#1f1c16] text-[#f6e9cc] dark:bg-[#f6e9cc] dark:text-[#1f1c16]'
+                            : 'border border-[#d7c7a7] text-[#6b5a3f] hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]'
+                        }`}
+                      >
+                        🎧 Both
                       </button>
                     </div>
+                    
+                    {/* Device selection dropdowns */}
+                    <div className="grid gap-2">
+                      {/* Microphone device selector */}
+                      {(audioSourceType === 'microphone' || audioSourceType === 'dual') && (
+                        <label className="flex flex-col gap-1 text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">
+                          <span>🎤 Microphone Device</span>
+                          <select
+                            value={selectedMicDevice}
+                            onChange={(e) => setSelectedMicDevice(e.target.value)}
+                            className="rounded-lg border border-[#d7c7a7] bg-white px-2 py-1.5 text-xs text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                          >
+                            {micDevices.map((device) => (
+                              <option key={device.id} value={device.id}>
+                                {device.name}
+                              </option>
+                            ))}
+                            {micDevices.length === 0 && (
+                              <option value="">No devices found</option>
+                            )}
+                          </select>
+                        </label>
+                      )}
+                      
+                      {/* System audio device selector */}
+                      {(audioSourceType === 'system' || audioSourceType === 'dual') && (
+                        <label className="flex flex-col gap-1 text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">
+                          <span>🔊 System Audio Device</span>
+                          <select
+                            value={selectedSystemDevice}
+                            onChange={(e) => setSelectedSystemDevice(e.target.value)}
+                            className="rounded-lg border border-[#d7c7a7] bg-white px-2 py-1.5 text-xs text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                          >
+                            {systemDevices.map((device) => (
+                              <option key={device.id} value={device.id}>
+                                {device.name}
+                              </option>
+                            ))}
+                            {systemDevices.length === 0 && (
+                              <option value="">No devices found</option>
+                            )}
+                          </select>
+                        </label>
+                      )}
+                    </div>
+                    
                     <p className="text-xs text-[#8b7a5a] dark:text-[#a08a68]">
                       {audioSourceType === 'microphone' 
-                        ? 'Capture from your microphone' 
-                        : 'Capture system audio output'}
+                        ? 'Capture from your microphone only' 
+                        : audioSourceType === 'system'
+                        ? 'Capture system audio output only'
+                        : 'Capture both microphone and system audio'}
                     </p>
                   </div>
                 )}
