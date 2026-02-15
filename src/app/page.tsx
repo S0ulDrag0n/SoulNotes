@@ -1138,9 +1138,9 @@ const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
                     Switch between translation and summary views.
                   </p>
                 </div>
-                {isSummarizing && (
-                  <span className="rounded-full border border-[#d7c7a7] bg-white/70 px-3 py-1 text-xs font-medium text-[#6b5a3f] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#cdbda6]">
-                    Summarizing…
+              {isSummarizing && (
+                  <span className="animate-pulse rounded-full border border-amber-400 bg-amber-100 px-4 py-1.5 text-xs font-bold text-amber-800 shadow-lg shadow-amber-400/25 dark:border-amber-500 dark:bg-amber-900/60 dark:text-amber-200">
+                    ⚡ Summarizing…
                   </span>
                 )}
                 <label className="flex flex-col gap-2 text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
