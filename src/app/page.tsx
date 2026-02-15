@@ -828,6 +828,35 @@ export default function Home() {
     };
   }, [isRecording, translation]);
 
+// -------------------------------------------------------
+  // Save functions
+  // -------------------------------------------------------
+const saveToFile = (content: string, filename: string) => {
+    if (!content.trim()) {
+      alert('No content to save');
+      return;
+    }
+    
+    // Determine MIME type based on file extension
+    const isMarkdown = filename.endsWith('.md');
+    const mimeType = isMarkdown ? 'text/markdown' : 'text/plain';
+    
+    // Use browser download (works in both browser and Tauri)
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
+  const handleSaveTranslation = () => saveToFile(translation, 'translation.md');
+  const handleSaveSummary = () => saveToFile(summary, 'summary.md');
+
   // -------------------------------------------------------
   // UI rendering
   // -------------------------------------------------------
@@ -1032,12 +1061,22 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="flex-1 rounded-2xl border border-black/10 bg-white/80 p-6 shadow-[0_20px_60px_-50px_rgba(51,41,25,0.6)] backdrop-blur dark:border-white/10 dark:bg-[#15120d]/85">
+<div className="flex-1 rounded-2xl border border-black/10 bg-white/80 p-6 shadow-[0_20px_60px_-50px_rgba(51,41,25,0.6)] backdrop-blur dark:border-white/10 dark:bg-[#15120d]/85">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-[#1f1c16] dark:text-[#f3e9d8]">Transcript</h2>
-                <span className="text-xs font-medium uppercase tracking-[0.2em] text-[#a08a68] dark:text-[#c1ab88]">
-                  Live
-                </span>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-semibold text-[#1f1c16] dark:text-[#f3e9d8]">Transcript</h2>
+                  <span className="text-xs font-medium uppercase tracking-[0.2em] text-[#a08a68] dark:text-[#c1ab88]">
+                    Live
+                  </span>
+                </div>
+                <button
+                  onClick={handleSaveTranscript}
+                  disabled={!transcript.trim()}
+                  className="rounded-lg border border-[#d7c7a7] bg-white/70 px-2 py-1 text-xs font-medium text-[#6b5a3f] transition hover:bg-[#efe0c3] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#cdbda6] dark:hover:bg-[#2a2218]"
+                  title="Save transcript to file"
+                >
+                  💾 Save
+                </button>
               </div>
               <div
                 ref={transcriptScrollRef}
@@ -1090,27 +1129,47 @@ export default function Home() {
                 </label>
               </div>
 
-              <div className="mt-6 flex flex-wrap gap-2">
-                <button
-                  onClick={() => setActivePanel('translation')}
-                  className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
-                    activePanel === 'translation'
-                      ? 'bg-[#1f1c16] text-[#f6e9cc] dark:bg-[#f6e9cc] dark:text-[#1f1c16]'
-                      : 'border border-[#d7c7a7] text-[#6b5a3f] hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]'
-                  }`}
-                >
-                  Translation
-                </button>
-                <button
-                  onClick={() => setActivePanel('summary')}
-                  className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
-                    activePanel === 'summary'
-                      ? 'bg-[#1f1c16] text-[#f6e9cc] dark:bg-[#f6e9cc] dark:text-[#1f1c16]'
-                      : 'border border-[#d7c7a7] text-[#6b5a3f] hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]'
-                  }`}
-                >
-                  Summary
-                </button>
+<div className="mt-4 flex items-center justify-between">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setActivePanel('translation')}
+                    className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+                      activePanel === 'translation'
+                        ? 'bg-[#1f1c16] text-[#f6e9cc] dark:bg-[#f6e9cc] dark:text-[#1f1c16]'
+                        : 'border border-[#d7c7a7] text-[#6b5a3f] hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]'
+                    }`}
+                  >
+                    Translation
+                  </button>
+                  <button
+                    onClick={() => setActivePanel('summary')}
+                    className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+                      activePanel === 'summary'
+                        ? 'bg-[#1f1c16] text-[#f6e9cc] dark:bg-[#f6e9cc] dark:text-[#1f1c16]'
+                        : 'border border-[#d7c7a7] text-[#6b5a3f] hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]'
+                    }`}
+                  >
+                    Summary
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSaveTranslation}
+                    disabled={!translation.trim() || activePanel !== 'translation'}
+                    className="rounded-lg border border-[#d7c7a7] bg-white/70 px-2 py-1 text-xs font-medium text-[#6b5a3f] transition hover:bg-[#efe0c3] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#cdbda6] dark:hover:bg-[#2a2218]"
+                    title="Save translation to file"
+                  >
+                    💾 Save
+                  </button>
+                  <button
+                    onClick={handleSaveSummary}
+                    disabled={!summary.trim() || activePanel !== 'summary'}
+                    className="rounded-lg border border-[#d7c7a7] bg-white/70 px-2 py-1 text-xs font-medium text-[#6b5a3f] transition hover:bg-[#efe0c3] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#cdbda6] dark:hover:bg-[#2a2218]"
+                    title="Save summary to file"
+                  >
+                    💾 Save
+                  </button>
+                </div>
               </div>
 
               <div
