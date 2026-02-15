@@ -7,8 +7,7 @@
     "frontendDist": "../.next/server/app",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
-    "devtools": true
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [

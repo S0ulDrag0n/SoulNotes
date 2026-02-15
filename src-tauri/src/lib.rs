@@ -12,10 +12,14 @@ struct AudioChunk {
 }
 
 struct AudioState {
-    stream: Option<Stream>,
+    stream: Mutex<Option<Stream>>,
     is_recording: AtomicBool,
     device_name: Mutex<Option<String>>,
 }
+
+// Safe wrapper for Stream since cpal Stream is not Send/Sync
+unsafe impl Send for AudioState {}
+unsafe impl Sync for AudioState {}
 
 #[tauri::command]
 fn get_audio_devices() -> Result<Vec<String>, String> {
@@ -53,6 +57,15 @@ async fn start_audio_capture(
         return Err("Already recording".to_string());
     }
 
+    let is_recording = Arc::new(AtomicBool::new(true));
+    let app_handle_err = app.clone();
+    let app_handle_data = app.clone();
+    
+    let err_fn = move |err: cpal::StreamError| {
+        log::error!("Audio stream error: {}", err);
+        let _ = app_handle_err.emit("audio-error", err.to_string());
+    };
+
     let host = cpal::default_host();
     
     // Select device: microphone input or system audio (loopback)
@@ -71,32 +84,28 @@ async fn start_audio_capture(
         }
     };
 
-    let config = device.default_input_config()
+    let config: cpal::SupportedStreamConfig = device.default_input_config()
         .map_err(|e| e.to_string())?
         .into();
 
-    let is_recording = Arc::new(AtomicBool::new(true));
-    let app_handle = app.clone();
-    
-    let err_fn = move |err| {
-        log::error!("Audio stream error: {}", err);
-        let _ = app_handle.emit("audio-error", err.to_string());
-    };
+    let stream_config: cpal::StreamConfig = config.clone().into();
+    let sample_rate = config.sample_rate().0;
+    let channels = config.channels();
 
-    let stream = match config.sample_format {
+    let stream = match config.sample_format() {
         SampleFormat::F32 => {
             device.build_input_stream(
-                &config,
+                &stream_config,
                 move |data: &[f32], _: &_| {
                     if !is_recording.load(Ordering::SeqCst) { return; }
                     // Convert f32 to bytes
                     let bytes: Vec<u8> = data.iter()
                         .flat_map(|&s| s.to_le_bytes())
                         .collect();
-                    let _ = app_handle.emit("audio-chunk", AudioChunk {
+                    let _ = app_handle_data.emit("audio-chunk", AudioChunk {
                         data: bytes,
-                        sample_rate: config.sample_rate.0,
-                        channels: config.channels,
+                        sample_rate,
+                        channels,
                     });
                 },
                 err_fn,
@@ -105,16 +114,16 @@ async fn start_audio_capture(
         }
         SampleFormat::I16 => {
             device.build_input_stream(
-                &config,
+                &stream_config,
                 move |data: &[i16], _: &_| {
                     if !is_recording.load(Ordering::SeqCst) { return; }
                     let bytes: Vec<u8> = data.iter()
                         .flat_map(|&s| s.to_le_bytes())
                         .collect();
-                    let _ = app_handle.emit("audio-chunk", AudioChunk {
+                    let _ = app_handle_data.emit("audio-chunk", AudioChunk {
                         data: bytes,
-                        sample_rate: config.sample_rate.0,
-                        channels: config.channels,
+                        sample_rate,
+                        channels,
                     });
                 },
                 err_fn,
@@ -126,7 +135,7 @@ async fn start_audio_capture(
 
     stream.play().map_err(|e| e.to_string())?;
     
-    state.stream = Some(stream);
+    *state.stream.lock().unwrap() = Some(stream);
     state.is_recording.store(true, Ordering::SeqCst);
     *state.device_name.lock().unwrap() = device_name;
     
@@ -137,7 +146,7 @@ async fn start_audio_capture(
 async fn stop_audio_capture(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AudioState>();
     state.is_recording.store(false, Ordering::SeqCst);
-    state.stream = None;
+    *state.stream.lock().unwrap() = None;
     *state.device_name.lock().unwrap() = None;
     Ok(())
 }
@@ -152,7 +161,7 @@ fn is_recording(app: AppHandle) -> bool {
 pub fn run() {
     tauri::Builder::default()
     .manage(AudioState {
-        stream: None,
+        stream: Mutex::new(None),
         is_recording: AtomicBool::new(false),
         device_name: Mutex::new(None),
     })

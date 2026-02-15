@@ -4,6 +4,9 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 
+// Check if running in Tauri (from environment variable)
+const isTauri = process.env.isTauri === 'true';
+
 // -----------------------------------------------------------------------------
 // Helper function to call backend APIs
 // -----------------------------------------------------------------------------
@@ -76,6 +79,13 @@ export default function Home() {
     'translation'
   );
   const [isDarkMode, setIsDarkMode] = useState(false);
+  
+  // Audio source selection (Tauri only)
+  const [audioSourceType, setAudioSourceType] = useState<'microphone' | 'system'>('microphone');
+  const [audioDevices, setAudioDevices] = useState<string[]>([]);
+  const [selectedDevice, setSelectedDevice] = useState<string>('');
+  const [isDesktopMode, setIsDesktopMode] = useState(false);
+  
   const [realtimeConfig, setRealtimeConfig] = useState({
     baseUrl: 'http://10.61.46.95:10300',
     transcribeModel: 'Systran/faster-whisper-large-v3',
@@ -842,6 +852,44 @@ export default function Home() {
                     <option value="ar">Arabic</option>
                   </select>
                 </label>
+                
+                {/* Audio Source Selector - Only show in Tauri/Desktop mode */}
+                {isTauri && (
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+                      Audio Source
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAudioSourceType('microphone')}
+                        className={`flex-1 rounded-xl px-3 py-2 text-xs font-medium transition ${
+                          audioSourceType === 'microphone'
+                            ? 'bg-[#1f1c16] text-[#f6e9cc] dark:bg-[#f6e9cc] dark:text-[#1f1c16]'
+                            : 'border border-[#d7c7a7] text-[#6b5a3f] hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]'
+                        }`}
+                      >
+                        🎤 Microphone
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAudioSourceType('system')}
+                        className={`flex-1 rounded-xl px-3 py-2 text-xs font-medium transition ${
+                          audioSourceType === 'system'
+                            ? 'bg-[#1f1c16] text-[#f6e9cc] dark:bg-[#f6e9cc] dark:text-[#1f1c16]'
+                            : 'border border-[#d7c7a7] text-[#6b5a3f] hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]'
+                        }`}
+                      >
+                        🔊 System Audio
+                      </button>
+                    </div>
+                    <p className="text-xs text-[#8b7a5a] dark:text-[#a08a68]">
+                      {audioSourceType === 'microphone' 
+                        ? 'Capture from your microphone' 
+                        : 'Capture system audio output'}
+                    </p>
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-3">
                   <button
                     onClick={startRecording}

@@ -57,14 +57,10 @@ ${text}`;
     const response = await ollama.chat({
       model: process.env.OLLAMA_SUMMARIZE_MODEL ?? 'phi4:latest',
       messages: [{ role: 'user', content: prompt }],
-      stream: false,
-      temperature: 0.3,
-      num_predict: 2048,
-      top_p: 0.9,
-      top_k: 50,
-    } as any);
+    }) as { message?: { content?: string } };
 
-    return new Response(response.message.content ?? '', {
+    const content = response?.message?.content ?? '';
+    return new Response(content, {
       headers: { 'Content-Type': 'text/plain' }
     });
   } catch (err) {
