@@ -61,6 +61,7 @@ async function streamTextFromApi(
 export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
+  const [transcriptMessages, setTranscriptMessages] = useState<{id: string, text: string, timestamp: Date}[]>([]);
   const [translation, setTranslation] = useState('');
   const [summary, setSummary] = useState('');
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -177,6 +178,49 @@ const lastSummarizedTextRef = useRef('');
     isDesktopModeRef.current = isDesktopMode;
   }, [isDesktopMode]);
 
+  // Ref to track the current message being built (for realtime streaming)
+  const currentMessageRef = useRef<{id: string, text: string, timestamp: Date} | null>(null);
+
+  const addTranscriptMessage = (text: string, isFinal: boolean = true) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    if (isFinal) {
+      // Create a new message
+      const newMessage = {
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        text: trimmed,
+        timestamp: new Date()
+      };
+      setTranscriptMessages((prev) => [...prev, newMessage]);
+      setTranscript((prev) => (prev ? `${prev} ${trimmed}` : trimmed));
+      currentMessageRef.current = null;
+    } else {
+      // Update or create current streaming message
+      if (currentMessageRef.current) {
+        currentMessageRef.current = {
+          ...currentMessageRef.current,
+          text: trimmed
+        };
+        // Update in state for live preview
+        setTranscriptMessages((prev) => 
+          prev.map((msg) => 
+            msg.id === currentMessageRef.current?.id 
+              ? { ...msg, text: trimmed }
+              : msg
+          )
+        );
+      } else {
+        currentMessageRef.current = {
+          id: `streaming-${Date.now()}`,
+          text: trimmed,
+          timestamp: new Date()
+        };
+        setTranscriptMessages((prev) => [...prev, currentMessageRef.current!]);
+      }
+    }
+  };
+
   const sendAudioChunk = async (audioBlob: Blob) => {
     const formData = new FormData();
     formData.append('file', audioBlob, 'audio.webm');
@@ -192,7 +236,7 @@ const lastSummarizedTextRef = useRef('');
 
     const text = await response.text();
     if (text.trim()) {
-      setTranscript((prev) => (prev ? `${prev} ${text.trim()}` : text.trim()));
+      addTranscriptMessage(text.trim(), true);
     }
   };
 
@@ -369,7 +413,7 @@ const lastSummarizedTextRef = useRef('');
     if (transcriptAutoScrollRef.current) {
       scrollToBottom(element);
     }
-  }, [transcript, isTranscribing]);
+  }, [transcript, transcriptMessages, isTranscribing]);
 
   useEffect(() => {
     const element = outputScrollRef.current;
@@ -414,17 +458,25 @@ const lastSummarizedTextRef = useRef('');
     );
   };
 
-  const appendTranscript = (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    setTranscript((prev) => (prev ? `${prev} ${trimmed}` : trimmed));
+  const appendTranscript = (text: string, isFinal: boolean = true) => {
+    addTranscriptMessage(text, isFinal);
   };
 
   const parseRealtimeMessage = (message: string) => {
     try {
       const data = JSON.parse(message);
+      
+      // Handle streaming transcripts (partial/interim results)
+      if (data?.type === 'conversation.item.input_audio_transcription.delta') {
+        const delta = data.delta ?? data.text ?? data.content ?? data?.data?.text;
+        if (typeof delta === 'string' && delta.trim()) {
+          appendTranscript(delta, false); // Not final yet
+          return;
+        }
+      }
+
       if (typeof data === 'string') {
-        appendTranscript(data);
+        appendTranscript(data, true);
         return;
       }
 
@@ -435,7 +487,7 @@ const lastSummarizedTextRef = useRef('');
           data.item?.content?.[0]?.transcript ??
           data.item?.payload?.transcriptions?.[0]?.text;
         if (typeof transcription === 'string') {
-          appendTranscript(transcription);
+          appendTranscript(transcription, true);
           return;
         }
       }
@@ -448,10 +500,10 @@ const lastSummarizedTextRef = useRef('');
         data.content ??
         data?.data?.text;
       if (typeof text === 'string') {
-        appendTranscript(text);
+        appendTranscript(text, true);
       }
     } catch {
-      appendTranscript(message);
+      appendTranscript(message, true);
     }
   };
 
@@ -571,6 +623,7 @@ const lastSummarizedTextRef = useRef('');
         setActivePanel('translation');
       }
       setTranscript('');
+      setTranscriptMessages([]);
       setTranslation('');
       setSummary('');
       setIsTranscribing(true);
@@ -1120,11 +1173,44 @@ const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
                   const element = event.currentTarget;
                   transcriptAutoScrollRef.current = isNearBottom(element);
                 }}
-                className="mt-4 min-h-[160px] max-h-[min(45vh,360px)] overflow-auto text-sm text-[#2a241b] dark:text-[#f0e6d5]"
+                className="mt-4 min-h-[160px] max-h-[min(45vh,360px)] overflow-auto"
               >
-                <p className="whitespace-pre-wrap">
-                  {transcript || (isTranscribing ? 'Transcribing…' : 'No transcript yet.')}
-                </p>
+                {transcriptMessages.length > 0 ? (
+                  <div className="flex flex-col gap-3">
+                    {transcriptMessages.map((msg) => {
+                      const isStreaming = msg.id.startsWith('streaming-');
+                      const timeStr = msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                      return (
+                        <div 
+                          key={msg.id} 
+                          className={`group relative rounded-2xl px-4 py-3 text-sm ${
+                            isStreaming 
+                              ? 'bg-amber-50 border border-amber-200 dark:bg-amber-900/30 dark:border-amber-700' 
+                              : 'bg-[#efe0c3]/50 dark:bg-[#2a2218]/50'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="whitespace-pre-wrap text-[#2a241b] dark:text-[#f0e6d5]">
+                              {msg.text}
+                            </p>
+                            <span className="shrink-0 text-xs text-[#a08a68] dark:text-[#8b7355] opacity-0 group-hover:opacity-100 transition-opacity">
+                              {timeStr}
+                            </span>
+                          </div>
+                          {isStreaming && (
+                            <span className="absolute bottom-2 right-3 text-xs text-amber-600 dark:text-amber-400 animate-pulse">
+                              …
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="whitespace-pre-wrap text-sm text-[#2a241b] dark:text-[#f0e6d5]">
+                    {isTranscribing ? 'Transcribing…' : 'No transcript yet.'}
+                  </p>
+                )}
               </div>
             </div>
           </section>
