@@ -34,4 +34,7 @@ tokio = { version = "1", features = ["sync", "rt"] }
 serde_yaml = "0.9"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"] }
+
+# Async streaming
+futures-util = "0.3"

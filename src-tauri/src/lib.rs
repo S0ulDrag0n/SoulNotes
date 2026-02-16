@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use reqwest;
+use futures_util::StreamExt;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
 struct AudioChunk {
@@ -341,7 +342,7 @@ fn get_default_config() -> AppConfig {
     }
 }
 
-// Translate text using Ollama - direct connection
+// Translate text using Ollama - streaming version for Tauri
 #[tauri::command]
 async fn translate_text(
     app: AppHandle,
@@ -403,15 +404,15 @@ async fn translate_text(
         .header("Content-Type", "application/json");
         
     // Add authorization header if token is provided (env var or config)
-    if let Some(token) = std::env::var("OLLAMA_API_TOKEN").ok().or(config.ollama_api_token) {
+    if let Some(token) = std::env::var("OLLAMA_API_TOKEN").ok().or(config.ollama_api_token.clone()) {
         request_builder = request_builder.header("Authorization", format!("Bearer {}", token));
     }
     
-    // Use chat/completions format with messages array
+    // Use chat/completions format with messages array - ENABLE STREAMING
     let body = serde_json::json!({
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "stream": false,
+        "stream": true,
         "temperature": 0.3,
         "num_predict": 2048,
         "top_p": 0.9,
@@ -431,20 +432,47 @@ async fn translate_text(
         return Err(format!("Translation API error: {} - {}", status, error_text));
     }
     
-    let json_response: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    // Stream the response
+    let mut full_text = String::new();
+    let mut stream = response.bytes_stream();
     
-    // Extract translated text from response
-    let translated_text = json_response
-        .get("message")
-        .and_then(|msg| msg.get("content"))
-        .and_then(|content| content.as_str())
-        .unwrap_or("")
-        .to_string();
+    while let Some(chunk_result) = stream.next().await {
+        match chunk_result {
+            Ok(chunk) => {
+                let chunk_str = String::from_utf8_lossy(&chunk);
+                // Ollama sends JSON objects separated by newlines
+                for line in chunk_str.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    // Parse each JSON line
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                        if let Some(content) = json.get("message")
+                            .and_then(|msg| msg.get("content"))
+                            .and_then(|c| c.as_str()) 
+                        {
+                            full_text.push_str(content);
+                            // Emit streaming event to frontend
+                            let _ = app.emit("translation-chunk", content);
+                        }
+                        // Check if done
+                        if json.get("done").and_then(|d| d.as_bool()).unwrap_or(false) {
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("Stream error: {}", e);
+                break;
+            }
+        }
+    }
+    
+    // Emit completion event
+    let _ = app.emit("translation-complete", &full_text);
         
-    Ok(translated_text)
+    Ok(full_text)
 }
 
 // Summarize text using Ollama - direct connection

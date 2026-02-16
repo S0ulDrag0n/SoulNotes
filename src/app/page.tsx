@@ -774,23 +774,63 @@ const lastSummarizedTextRef = useRef('');
       
       // Use ref for current value to avoid stale closure issues
       if (isDesktopModeRef.current) {
-        console.log('Using Tauri invoke for translation');
-        // Use Tauri invoke for translation in desktop mode
+        console.log('Using Tauri invoke for translation with streaming');
         const { invoke } = await import('@tauri-apps/api/core');
-        const result = await invoke<string>('translate_text', {
-          text,
-          sourceLanguage: latestSourceLanguageRef.current,
-          targetLanguage: latestTargetLanguageRef.current
-        });
+        const { listen } = await import('@tauri-apps/api/event');
         
-        if (translateRequestIdRef.current !== requestId) {
-          return;
+        // Set up event listeners for streaming
+        let chunkUnlisten: (() => void) | null = null;
+        let completeUnlisten: (() => void) | null = null;
+        
+        try {
+          // Listen for translation chunks
+          chunkUnlisten = await listen<string>('translation-chunk', (event) => {
+            if (translateRequestIdRef.current !== requestId) {
+              return;
+            }
+            accumulatedText += event.payload;
+            if (!hasStarted) {
+              hasStarted = true;
+              addTranslationMessage(accumulatedText, false);
+              return;
+            }
+            // Update the current streaming message
+            addTranslationMessage(accumulatedText, false);
+          });
+          
+          // Listen for translation complete
+          completeUnlisten = await listen<string>('translation-complete', (event) => {
+            if (translateRequestIdRef.current !== requestId) {
+              return;
+            }
+            // Finalize the message
+            if (accumulatedText) {
+              addTranslationMessage(accumulatedText, true);
+            }
+          });
+          
+          // Call the translate command (it will stream events)
+          const result = await invoke<string>('translate_text', {
+            text,
+            sourceLanguage: latestSourceLanguageRef.current,
+            targetLanguage: latestTargetLanguageRef.current
+          });
+          
+          if (translateRequestIdRef.current !== requestId) {
+            return;
+          }
+          
+          console.log('Translation streaming complete:', result.substring(0, 100));
+          
+          // Ensure final message is added (in case complete event didn't fire)
+          if (accumulatedText && translateRequestIdRef.current === requestId) {
+            addTranslationMessage(accumulatedText, true);
+          }
+        } finally {
+          // Clean up event listeners
+          if (chunkUnlisten) chunkUnlisten();
+          if (completeUnlisten) completeUnlisten();
         }
-        
-        console.log('Translation result:', result.substring(0, 100));
-        const chunk = result;
-        accumulatedText = chunk;
-        addTranslationMessage(chunk, true);
       } else {
         console.log('Using web API for translation');
         // Use web API in browser mode
