@@ -86,10 +86,21 @@ export default function Home() {
   const [selectedMicDevice, setSelectedMicDevice] = useState<string>('');
   const [selectedSystemDevice, setSelectedSystemDevice] = useState<string>('');
   const [isDesktopMode, setIsDesktopMode] = useState(false);
-  const [desktopRecording, setDesktopRecording] = useState(false);
   
-  // Tauri event listener refs
-  const audioChunkRef = useRef<{source: string, data: number[], sampleRate: number, channels: number}[]>([]);
+  // Settings modal state (desktop only)
+  const [showSettings, setShowSettings] = useState(false);
+  const [appConfig, setAppConfig] = useState<{
+    speaches_base_url?: string;
+    speaches_transcribe_model?: string;
+    speaches_transcribe_language?: string;
+    ollama_base_url?: string;
+    ollama_api_token?: string;
+    ollama_translate_model?: string;
+    ollama_summarize_model?: string;
+    translate_prompt?: string;
+    summarize_prompt?: string;
+  }>({});
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
   
 // Load audio devices on mount (Tauri only)
   useEffect(() => {
@@ -112,9 +123,26 @@ export default function Home() {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         
-        // Try to get saved config (includes device settings)
-        const savedConfig = await invoke<any>('get_config');
+        // Try to get saved config (includes device settings and language)
+        const savedConfig = await invoke<{
+          speaches_transcribe_language?: string;
+          capture_mode?: string;
+          mic_device?: string;
+          system_audio_device?: string;
+        }>('get_config');
         console.log('Loaded saved config:', savedConfig);
+        
+        // Set language from Tauri config if available
+        if (savedConfig?.speaches_transcribe_language && !languageTouchedRef.current) {
+          const lang = savedConfig.speaches_transcribe_language;
+          if (lang.startsWith('zh-')) {
+            setRealtimeLanguage('zh');
+            setChineseVariant(lang === 'zh-simplified' ? 'simplified' : 'traditional');
+          } else {
+            setRealtimeLanguage(lang);
+          }
+          console.log('Language loaded from Tauri config:', lang);
+        }
         
         // Get mic devices
         const micDevicesResult = await invoke<[string, string][]>('get_audio_devices');
@@ -822,13 +850,14 @@ const lastSummarizedTextRef = useRef('');
     setActivePanel('summary');
   };
 
-// -------------------------------------------------------
+  // -------------------------------------------------------
   // Translate using backend API or Tauri invoke (desktop mode)
   // -------------------------------------------------------
   const translate = async (requestId: number, text: string, shouldAppend: boolean) => {
     try {
       let hasStarted = false;
       let accumulatedText = '';
+      let isFinalized = false;
       
       // Use ref for current value to avoid stale closure issues
       if (isDesktopModeRef.current) {
@@ -858,9 +887,10 @@ const lastSummarizedTextRef = useRef('');
           
           // Listen for translation complete
           completeUnlisten = await listen<string>('translation-complete', (event) => {
-            if (translateRequestIdRef.current !== requestId) {
+            if (translateRequestIdRef.current !== requestId || isFinalized) {
               return;
             }
+            isFinalized = true;
             // Finalize the message
             if (accumulatedText) {
               addTranslationMessage(accumulatedText, true);
@@ -868,7 +898,7 @@ const lastSummarizedTextRef = useRef('');
           });
           
           // Call the translate command (it will stream events)
-          const result = await invoke<string>('translate_text', {
+          await invoke<string>('translate_text', {
             text,
             sourceLanguage: latestSourceLanguageRef.current,
             targetLanguage: latestTargetLanguageRef.current
@@ -878,10 +908,8 @@ const lastSummarizedTextRef = useRef('');
             return;
           }
           
-          console.log('Translation streaming complete:', result.substring(0, 100));
-          
-          // Ensure final message is added (in case complete event didn't fire)
-          if (accumulatedText && translateRequestIdRef.current === requestId) {
+          // If complete event didn't fire, finalize here
+          if (!isFinalized && accumulatedText && translateRequestIdRef.current === requestId) {
             addTranslationMessage(accumulatedText, true);
           }
         } finally {
@@ -1098,6 +1126,94 @@ const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
   const handleSaveSummary = () => saveToFile(summary, 'summary.md');
 
   // -------------------------------------------------------
+  // Settings modal functions (desktop only)
+  // -------------------------------------------------------
+  const loadSettings = async () => {
+    if (!isDesktopMode) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      // Get defaults first
+      const defaults = await invoke<typeof appConfig>('get_default_config');
+      // Get current config
+      const currentConfig = await invoke<typeof appConfig>('get_config');
+      // Merge: current values override defaults
+      setAppConfig({
+        ...defaults,
+        ...currentConfig,
+      });
+    } catch (err) {
+      console.error('Failed to load settings:', err);
+    }
+  };
+
+  const saveSettings = async () => {
+    if (!isDesktopMode) return;
+    setIsSavingConfig(true);
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      // Filter out empty strings - convert to undefined so they don't overwrite defaults
+      const configToSave: typeof appConfig = {};
+      for (const [key, value] of Object.entries(appConfig)) {
+        if (value && value.trim() !== '') {
+          configToSave[key as keyof typeof appConfig] = value;
+        }
+      }
+      
+      console.log('Saving config:', configToSave);
+      await invoke('save_config', { config: configToSave });
+      alert('Settings saved successfully!');
+      setShowSettings(false);
+    } catch (err) {
+      console.error('Failed to save settings:', err);
+      alert('Failed to save settings');
+    } finally {
+      setIsSavingConfig(false);
+    }
+  };
+
+  const resetToDefaults = async () => {
+    if (!isDesktopMode) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const defaults = await invoke<typeof appConfig>('get_default_config');
+      setAppConfig(defaults || {});
+    } catch (err) {
+      console.error('Failed to get defaults:', err);
+    }
+  };
+
+  // Load settings when modal opens
+  useEffect(() => {
+    if (showSettings && isDesktopMode) {
+      loadSettings();
+    }
+  }, [showSettings, isDesktopMode]);
+
+  // Save language to config when changed in UI (desktop mode only)
+  useEffect(() => {
+    if (!isDesktopMode || !languageTouchedRef.current) return;
+    
+    const saveLanguage = async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        // For Chinese, include the variant in the saved language
+        const languageToSave = realtimeLanguage === 'zh' 
+          ? `zh-${chineseVariant}` 
+          : realtimeLanguage;
+        await invoke('save_language', { language: languageToSave });
+        console.log('Language saved:', languageToSave);
+      } catch (err) {
+        console.error('Failed to save language preference:', err);
+      }
+    };
+    
+    // Debounce slightly to avoid saving on every keystroke
+    const timeout = setTimeout(saveLanguage, 500);
+    return () => clearTimeout(timeout);
+  }, [isDesktopMode, realtimeLanguage, chineseVariant]);
+
+  // -------------------------------------------------------
   // UI rendering
   // -------------------------------------------------------
   return (
@@ -1117,6 +1233,15 @@ const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {isDesktopMode && (
+              <button
+                type="button"
+                onClick={() => setShowSettings(true)}
+                className="rounded-full border border-[#d7c7a7] bg-white/70 px-3 py-1 text-xs font-medium text-[#6b5a3f] transition hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#cdbda6] dark:hover:bg-[#2a2218]"
+              >
+                ⚙️ Settings
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setIsDarkMode((prev) => !prev)}
@@ -1521,6 +1646,182 @@ const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
           </section>
         </div>
       </main>
+
+      {/* Settings Modal - Desktop only */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-2xl border border-black/10 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-[#15120d]">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-[#1f1c16] dark:text-[#f3e9d8]">
+                ⚙️ Settings
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowSettings(false)}
+                className="rounded-lg p-2 text-[#6b5a3f] hover:bg-[#efe0c3] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Speaches Settings */}
+              <section>
+                <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-[#8b7a5a] dark:text-[#c9b89f]">
+                  Transcription (Speaches)
+                </h3>
+                <div className="grid gap-4">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+                      Base URL
+                    </span>
+                    <input
+                      type="text"
+                      value={appConfig.speaches_base_url || ''}
+                      onChange={(e) => setAppConfig({ ...appConfig, speaches_base_url: e.target.value })}
+                      placeholder="http://10.61.46.95:10300"
+                      className="rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+                      Transcription Model
+                    </span>
+                    <input
+                      type="text"
+                      value={appConfig.speaches_transcribe_model || ''}
+                      onChange={(e) => setAppConfig({ ...appConfig, speaches_transcribe_model: e.target.value })}
+                      placeholder="Systran/faster-whisper-large-v3"
+                      className="rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                    />
+                  </label>
+                </div>
+              </section>
+
+              {/* Ollama Settings */}
+              <section>
+                <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-[#8b7a5a] dark:text-[#c9b89f]">
+                  AI Models (Ollama)
+                </h3>
+                <div className="grid gap-4">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+                      Ollama Base URL
+                    </span>
+                    <input
+                      type="text"
+                      value={appConfig.ollama_base_url || ''}
+                      onChange={(e) => setAppConfig({ ...appConfig, ollama_base_url: e.target.value })}
+                      placeholder="http://10.61.46.95:10102"
+                      className="rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+                      API Token (optional)
+                    </span>
+                    <input
+                      type="password"
+                      value={appConfig.ollama_api_token || ''}
+                      onChange={(e) => setAppConfig({ ...appConfig, ollama_api_token: e.target.value })}
+                      placeholder="Enter API token if required"
+                      className="rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+                      Translation Model
+                    </span>
+                    <input
+                      type="text"
+                      value={appConfig.ollama_translate_model || ''}
+                      onChange={(e) => setAppConfig({ ...appConfig, ollama_translate_model: e.target.value })}
+                      placeholder="aya-expanse:latest"
+                      className="rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+                      Summarization Model
+                    </span>
+                    <input
+                      type="text"
+                      value={appConfig.ollama_summarize_model || ''}
+                      onChange={(e) => setAppConfig({ ...appConfig, ollama_summarize_model: e.target.value })}
+                      placeholder="phi4:latest"
+                      className="rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                    />
+                  </label>
+                </div>
+              </section>
+
+              {/* Custom Prompts */}
+              <section>
+                <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-[#8b7a5a] dark:text-[#c9b89f]">
+                  Custom Prompts
+                </h3>
+                <div className="grid gap-4">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+                      Translation Prompt
+                    </span>
+                    <p className="mb-1 text-xs text-[#8b7a5a] dark:text-[#a08a68]">
+                      Use {"{source_language}"}, {"{target_language}"}, {"{text}"} as placeholders
+                    </p>
+                    <textarea
+                      value={appConfig.translate_prompt || ''}
+                      onChange={(e) => setAppConfig({ ...appConfig, translate_prompt: e.target.value })}
+                      placeholder="Translate the following text from {source_language} to {target_language}..."
+                      rows={4}
+                      className="rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+                      Summarization Prompt
+                    </span>
+                    <p className="mb-1 text-xs text-[#8b7a5a] dark:text-[#a08a68]">
+                      Use {"{text}"} as placeholder
+                    </p>
+                    <textarea
+                      value={appConfig.summarize_prompt || ''}
+                      onChange={(e) => setAppConfig({ ...appConfig, summarize_prompt: e.target.value })}
+                      placeholder="SUMMARIZE THE FOLLOWING CONTENT..."
+                      rows={6}
+                      className="rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                    />
+                  </label>
+                </div>
+              </section>
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={resetToDefaults}
+                className="rounded-xl border border-[#d7c7a7] px-4 py-2 text-sm font-medium text-[#6b5a3f] transition hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]"
+              >
+                Reset to Defaults
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSettings(false)}
+                className="rounded-xl border border-[#d7c7a7] px-4 py-2 text-sm font-medium text-[#6b5a3f] transition hover:bg-[#efe0c3] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveSettings}
+                disabled={isSavingConfig}
+                className="rounded-xl bg-[#1f1c16] px-4 py-2 text-sm font-semibold text-[#f6e9cc] transition hover:bg-[#342d22] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#f6e9cc] dark:text-[#1f1c16] dark:hover:bg-[#e9d3a7]"
+              >
+                {isSavingConfig ? 'Saving...' : 'Save Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -312,7 +312,7 @@ fn get_config(app: AppHandle) -> AppConfig {
     config
 }
 
-// Save config to YAML file
+// Save config to YAML file (merges with existing values)
 #[tauri::command]
 fn save_config(app: AppHandle, config: AppConfig) -> Result<(), String> {
     let config_path = get_config_path(&app);
@@ -322,13 +322,44 @@ fn save_config(app: AppHandle, config: AppConfig) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     
-    // Serialize and write config
-    let yaml = serde_yaml::to_string(&config).map_err(|e| e.to_string())?;
+    // Get current in-memory config
+    let state = app.state::<AudioState>();
+    let current_config = state.config.lock().unwrap().clone();
+    
+    // Merge: new values override old ones, but keep old ones if new ones are None/empty
+    let merged = AppConfig {
+        speaches_base_url: config.speaches_base_url.filter(|s| !s.is_empty())
+            .or(current_config.speaches_base_url),
+        speaches_transcribe_model: config.speaches_transcribe_model.filter(|s| !s.is_empty())
+            .or(current_config.speaches_transcribe_model),
+        speaches_transcribe_language: config.speaches_transcribe_language.filter(|s| !s.is_empty())
+            .or(current_config.speaches_transcribe_language),
+        ollama_base_url: config.ollama_base_url.filter(|s| !s.is_empty())
+            .or(current_config.ollama_base_url),
+        ollama_api_token: config.ollama_api_token.filter(|s| !s.is_empty())
+            .or(current_config.ollama_api_token),
+        ollama_translate_model: config.ollama_translate_model.filter(|s| !s.is_empty())
+            .or(current_config.ollama_translate_model),
+        ollama_summarize_model: config.ollama_summarize_model.filter(|s| !s.is_empty())
+            .or(current_config.ollama_summarize_model),
+        translate_prompt: config.translate_prompt.filter(|s| !s.is_empty())
+            .or(current_config.translate_prompt),
+        summarize_prompt: config.summarize_prompt.filter(|s| !s.is_empty())
+            .or(current_config.summarize_prompt),
+        mic_device: config.mic_device.filter(|s| !s.is_empty())
+            .or(current_config.mic_device),
+        system_audio_device: config.system_audio_device.filter(|s| !s.is_empty())
+            .or(current_config.system_audio_device),
+        capture_mode: config.capture_mode.filter(|s| !s.is_empty())
+            .or(current_config.capture_mode),
+    };
+    
+    // Serialize and write merged config
+    let yaml = serde_yaml::to_string(&merged).map_err(|e| e.to_string())?;
     fs::write(&config_path, yaml).map_err(|e| e.to_string())?;
     
-    // Update in-memory config
-    let state = app.state::<AudioState>();
-    *state.config.lock().unwrap() = config;
+    // Update in-memory config with merged values
+    *state.config.lock().unwrap() = merged;
     
     log::info!("Config saved to: {:?}", config_path);
     Ok(())
@@ -380,6 +411,31 @@ fn save_device_settings(
     *state.config.lock().unwrap() = config;
     
     log::info!("Device settings saved");
+    Ok(())
+}
+
+// Save language preference to config
+#[tauri::command]
+fn save_language(app: AppHandle, language: String) -> Result<(), String> {
+    let state = app.state::<AudioState>();
+    let mut config = state.config.lock().unwrap().clone();
+    
+    config.speaches_transcribe_language = Some(language.clone());
+    
+    // Log before moving config
+    log::info!("Language preference saved: {}", language);
+    
+    // Use the save_config logic
+    let config_path = get_config_path(&app);
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let yaml = serde_yaml::to_string(&config).map_err(|e| e.to_string())?;
+    fs::write(&config_path, yaml).map_err(|e| e.to_string())?;
+    
+    // Update in-memory config
+    *state.config.lock().unwrap() = config;
+    
     Ok(())
 }
 
@@ -660,6 +716,7 @@ pub fn run() {
         save_config,
         get_default_config,
         save_device_settings,
+        save_language,
         translate_text,
         summarize_text,
     ])
