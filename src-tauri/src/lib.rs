@@ -26,6 +26,8 @@ pub struct AppConfig {
     pub ollama_api_token: Option<String>,
     pub ollama_translate_model: Option<String>,
     pub ollama_summarize_model: Option<String>,
+    pub translate_prompt: Option<String>,
+    pub summarize_prompt: Option<String>,
 }
 
 // State for dual audio capture
@@ -393,11 +395,15 @@ async fn translate_text(
         .map(|&(_, label)| label)
         .unwrap_or(&target_language);
     
-    // Create prompt for translation
-    let prompt = format!(
-        "Translate the following text from {} to {}. Translate as literally as possible. Preserve wording, order, repetition, fragments, and informal phrasing. Do not paraphrase or smooth the text. Do not add explanations or inferred meaning. Only return the translated text. Use clear paragraph breaks with a blank line between paragraphs.\n\n{}",
-        source_label, target_label, text
-    );
+    // Default prompt template for translation
+    let default_translate_prompt = "Translate the following text from {source_language} to {target_language}. Translate as literally as possible. Preserve wording, order, repetition, fragments, and informal phrasing. Do not paraphrase or smooth the text. Do not add explanations or inferred meaning. Only return the translated text. Use clear paragraph breaks with a blank line between paragraphs.\n\n{text}";
+    
+    // Use configured prompt or default
+    let prompt_template = config.translate_prompt.as_deref().unwrap_or(default_translate_prompt);
+    let prompt = prompt_template
+        .replace("{source_language}", source_label)
+        .replace("{target_language}", target_label)
+        .replace("{text}", &text);
     
     let mut request_builder = client
         .post(&url)
@@ -495,8 +501,8 @@ async fn summarize_text(app: AppHandle, text: String) -> Result<String, String> 
     let client = reqwest::Client::new();
     let url = format!("{}/api/chat", base_url);
     
-    // Create prompt for summarization
-    let prompt = format!("SUMMARIZE THE FOLLOWING CONTENT IN EXACTLY THE SAME FORMAT AND STRUCTURE SHOWN BELOW. DO NOT ADD ANY TEXT BEFORE OR AFTER THE SUMMARY.
+    // Default prompt template for summarization
+    let default_summarize_prompt = "SUMMARIZE THE FOLLOWING CONTENT IN EXACTLY THE SAME FORMAT AND STRUCTURE SHOWN BELOW. DO NOT ADD ANY TEXT BEFORE OR AFTER THE SUMMARY.
 
 FORMAT (MUST FOLLOW EXACTLY):
 # [Meeting Title]
@@ -526,7 +532,11 @@ RULES:
 - Output ONLY the summary in the exact format - no other text
 
 CONTENT:
-{}", text);
+{text}";
+    
+    // Use configured prompt or default
+    let prompt_template = config.summarize_prompt.as_deref().unwrap_or(default_summarize_prompt);
+    let prompt = prompt_template.replace("{text}", &text);
     
     let mut request_builder = client
         .post(&url)

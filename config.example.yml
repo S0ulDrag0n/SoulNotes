@@ -1,0 +1,57 @@
+# SoulNotes Configuration
+# Copy this file to config.yml and customize as needed
+# For Docker: mount config.yml to /app/config.yml or /app/data/config.yml
+
+# Speaches (Real-time Transcription) Settings
+speaches_base_url: "http://10.61.46.95:10300"
+speaches_transcribe_model: "Systran/faster-whisper-large-v3"
+speaches_transcribe_language: "zh"
+
+# Ollama (Translation & Summarization) Settings
+ollama_base_url: "http://10.61.46.95:10102"
+ollama_api_token: null  # Set if your Ollama requires authentication
+ollama_translate_model: "aya-expanse:latest"
+ollama_summarize_model: "phi4:latest"
+
+# Custom Prompts
+# Use {source_language}, {target_language}, and {text} as placeholders
+# These will be replaced at runtime
+
+# Translation Prompt
+# The prompt used for translating text between languages
+translate_prompt: "Translate the following text from {source_language} to {target_language}. Translate as literally as possible. Preserve wording, order, repetition, fragments, and informal phrasing. Do not paraphrase or smooth the text. Do not add explanations or inferred meaning. Only return the translated text. Use clear paragraph breaks with a blank line between paragraphs.\n\n{text}"
+
+# Summarization Prompt
+# The prompt used for generating meeting summaries
+summarize_prompt: |
+  SUMMARIZE THE FOLLOWING CONTENT IN EXACTLY THE SAME FORMAT AND STRUCTURE SHOWN BELOW. DO NOT ADD ANY TEXT BEFORE OR AFTER THE SUMMARY.
+
+  FORMAT (MUST FOLLOW EXACTLY):
+  # [Meeting Title]
+
+  ## ACTION ITEMS
+  - [Action item]
+
+  ## MEETING SUMMARY
+  ### Meeting Purpose
+  [Purpose]
+
+  ### Key Takeaways
+  - [Takeaway]
+
+  ### Topics
+  - [Topic]
+
+  ### Next Steps
+  - [Next step]
+
+  RULES:
+  - Use concise, factual language - no fluff or explanations
+  - Each bullet should be 1-2 sentences with concrete details
+  - Do not include placeholder text like [Meeting Title] - use actual content
+  - If a field is unknown, omit that section entirely
+  - Preserve exact section spacing with blank lines between sections
+  - Output ONLY the summary in the exact format - no other text
+
+  CONTENT:
+  {text}
