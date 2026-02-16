@@ -62,6 +62,7 @@ export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [transcriptMessages, setTranscriptMessages] = useState<{id: string, text: string, timestamp: Date}[]>([]);
+  const [translationMessages, setTranslationMessages] = useState<{id: string, text: string, timestamp: Date}[]>([]);
   const [translation, setTranslation] = useState('');
   const [summary, setSummary] = useState('');
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -180,6 +181,51 @@ const lastSummarizedTextRef = useRef('');
 
   // Ref to track the current message being built (for realtime streaming)
   const currentMessageRef = useRef<{id: string, text: string, timestamp: Date} | null>(null);
+  const currentTranslationRef = useRef<{id: string, text: string, timestamp: Date} | null>(null);
+
+  const addTranslationMessage = (text: string, isFinal: boolean = true) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    if (isFinal) {
+      // If there's a current streaming message, remove it first (we'll replace it)
+      if (currentTranslationRef.current) {
+        const streamingId = currentTranslationRef.current.id;
+        setTranslationMessages((prev) => prev.filter((msg) => msg.id !== streamingId));
+        currentTranslationRef.current = null;
+      }
+      
+      // Create a new final message
+      const newMessage = {
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        text: trimmed,
+        timestamp: new Date()
+      };
+      setTranslationMessages((prev) => [...prev, newMessage]);
+      setTranslation((prev) => (prev ? `${prev} ${trimmed}` : trimmed));
+    } else {
+      // Update or create current streaming message
+      if (currentTranslationRef.current) {
+        // Update existing streaming message in place
+        const streamingId = currentTranslationRef.current.id;
+        setTranslationMessages((prev) => 
+          prev.map((msg) => 
+            msg.id === streamingId 
+              ? { ...msg, text: trimmed }
+              : msg
+          )
+        );
+      } else {
+        // Create new streaming message
+        currentTranslationRef.current = {
+          id: `translating-${Date.now()}`,
+          text: trimmed,
+          timestamp: new Date()
+        };
+        setTranslationMessages((prev) => [...prev, currentTranslationRef.current!]);
+      }
+    }
+  };
 
   const addTranscriptMessage = (text: string, isFinal: boolean = true) => {
     const trimmed = text.trim();
@@ -418,7 +464,7 @@ const lastSummarizedTextRef = useRef('');
   useEffect(() => {
     const element = outputScrollRef.current;
     if (!element) return;
-    if (activePanel === 'translation' && translation.trim()) {
+    if (activePanel === 'translation' && translationMessages.length > 0) {
       if (outputAutoScrollRef.current) {
         scrollToBottom(element);
       }
@@ -429,7 +475,7 @@ const lastSummarizedTextRef = useRef('');
         scrollToBottom(element);
       }
     }
-  }, [activePanel, translation, summary, isSummarizing]);
+  }, [activePanel, translation, translationMessages, summary, isSummarizing]);
 
   const buildSessionInstructions = () => {
     let extraInstructions = '';
@@ -625,6 +671,7 @@ const lastSummarizedTextRef = useRef('');
       setTranscript('');
       setTranscriptMessages([]);
       setTranslation('');
+      setTranslationMessages([]);
       setSummary('');
       setIsTranscribing(true);
       setIsProcessing(false);
@@ -723,6 +770,7 @@ const lastSummarizedTextRef = useRef('');
   const translate = async (requestId: number, text: string, shouldAppend: boolean) => {
     try {
       let hasStarted = false;
+      let accumulatedText = '';
       
       // Use ref for current value to avoid stale closure issues
       if (isDesktopModeRef.current) {
@@ -741,9 +789,8 @@ const lastSummarizedTextRef = useRef('');
         
         console.log('Translation result:', result.substring(0, 100));
         const chunk = result;
-        setTranslation((prev) =>
-          shouldAppend ? appendWithCleanup(prev, chunk) : normalizeTranslationText(chunk)
-        );
+        accumulatedText = chunk;
+        addTranslationMessage(chunk, true);
       } else {
         console.log('Using web API for translation');
         // Use web API in browser mode
@@ -758,16 +805,20 @@ const lastSummarizedTextRef = useRef('');
             if (translateRequestIdRef.current !== requestId) {
               return;
             }
+            accumulatedText += chunk;
             if (!hasStarted) {
               hasStarted = true;
-              setTranslation((prev) =>
-                shouldAppend ? appendWithCleanup(prev, chunk) : normalizeTranslationText(chunk)
-              );
+              addTranslationMessage(accumulatedText, false);
               return;
             }
-            setTranslation((prev) => appendWithCleanup(prev, chunk));
+            // Update the current streaming message
+            addTranslationMessage(accumulatedText, false);
           }
         );
+        // Finalize the streaming message - only if this is still the current request
+        if (accumulatedText && translateRequestIdRef.current === requestId) {
+          addTranslationMessage(accumulatedText, true);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -801,6 +852,7 @@ const lastSummarizedTextRef = useRef('');
         pendingTranslateBufferRef.current = '';
         inflightTranslatedTextRef.current = '';
         setTranslation('');
+        setTranslationMessages([]);
       }
 
       if (text === lastSeenTranscriptRef.current) {
@@ -815,6 +867,7 @@ const lastSummarizedTextRef = useRef('');
         inflightTranslatedTextRef.current = '';
         deltaText = text;
         setTranslation('');
+        setTranslationMessages([]);
       }
 
       lastSeenTranscriptRef.current = text;
@@ -1300,12 +1353,45 @@ const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
                   const element = event.currentTarget;
                   outputAutoScrollRef.current = isNearBottom(element);
                 }}
-                className="mt-6 min-h-[280px] max-h-[min(55vh,520px)] overflow-auto rounded-xl border border-[#efe0c3] bg-white/60 p-4 text-sm text-[#2a241b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f0e6d5]"
+                className="mt-6 min-h-[280px] max-h-[min(55vh,520px)] overflow-auto"
               >
                 {activePanel === 'translation' ? (
-                  <p className="whitespace-pre-wrap">
-                    {translation || 'Translation will appear here.'}
-                  </p>
+                  translationMessages.length > 0 ? (
+                    <div className="flex flex-col gap-3">
+                      {translationMessages.map((msg) => {
+                        const isTranslating = msg.id.startsWith('translating-');
+                        const timeStr = msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                        return (
+                          <div 
+                            key={msg.id} 
+                            className={`group relative rounded-2xl px-4 py-3 text-sm ${
+                              isTranslating 
+                                ? 'bg-blue-50 border border-blue-200 dark:bg-blue-900/30 dark:border-blue-700' 
+                                : 'bg-white dark:bg-[#2a2218]/50'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <p className="whitespace-pre-wrap text-[#2a241b] dark:text-[#f0e6d5]">
+                                {msg.text}
+                              </p>
+                              <span className="shrink-0 text-xs text-[#a08a68] dark:text-[#8b7355] opacity-0 group-hover:opacity-100 transition-opacity">
+                                {timeStr}
+                              </span>
+                            </div>
+                            {isTranslating && (
+                              <span className="absolute bottom-2 right-3 text-xs text-blue-600 dark:text-blue-400 animate-pulse">
+                                …
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="whitespace-pre-wrap text-sm text-[#2a241b] dark:text-[#f0e6d5]">
+                      Translation will appear here.
+                    </p>
+                  )
                 ) : summary ? (
                   <ReactMarkdown
                     components={{
