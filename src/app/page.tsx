@@ -112,22 +112,50 @@ export default function Home() {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         
-        // Try to get config - this verifies Tauri commands work
-        const config = await invoke<any>('get_default_config');
-        console.log('Tauri invoke works! Config:', config);
+        // Try to get saved config (includes device settings)
+        const savedConfig = await invoke<any>('get_config');
+        console.log('Loaded saved config:', savedConfig);
         
         // Get mic devices
         const micDevicesResult = await invoke<[string, string][]>('get_audio_devices');
-        setMicDevices(micDevicesResult.map(([id, name]) => ({ id, name })));
-        if (micDevicesResult.length > 0) {
-          setSelectedMicDevice(micDevicesResult[0][0]);
-        }
+        const micDevicesList = micDevicesResult.map(([id, name]) => ({ id, name }));
+        setMicDevices(micDevicesList);
         
         // Get system audio devices
         const systemDevicesResult = await invoke<[string, string][]>('get_system_audio_devices');
-        setSystemDevices(systemDevicesResult.map(([id, name]) => ({ id, name })));
-        if (systemDevicesResult.length > 0) {
-          setSelectedSystemDevice(systemDevicesResult[0][0]);
+        const systemDevicesList = systemDevicesResult.map(([id, name]) => ({ id, name }));
+        setSystemDevices(systemDevicesList);
+        
+        // Apply saved device settings if available and devices exist
+        if (savedConfig) {
+          // Set capture mode
+          if (savedConfig.capture_mode) {
+            setAudioSourceType(savedConfig.capture_mode as 'microphone' | 'system' | 'dual');
+          }
+          
+          // Set mic device - verify it still exists
+          if (savedConfig.mic_device && micDevicesList.some(d => d.id === savedConfig.mic_device)) {
+            setSelectedMicDevice(savedConfig.mic_device);
+          } else if (micDevicesList.length > 0) {
+            // Default to first device if saved one doesn't exist
+            setSelectedMicDevice(micDevicesList[0].id);
+          }
+          
+          // Set system audio device - verify it still exists
+          if (savedConfig.system_audio_device && systemDevicesList.some(d => d.id === savedConfig.system_audio_device)) {
+            setSelectedSystemDevice(savedConfig.system_audio_device);
+          } else if (systemDevicesList.length > 0) {
+            // Default to first device if saved one doesn't exist
+            setSelectedSystemDevice(systemDevicesList[0].id);
+          }
+        } else {
+          // No saved config - use defaults
+          if (micDevicesList.length > 0) {
+            setSelectedMicDevice(micDevicesList[0].id);
+          }
+          if (systemDevicesList.length > 0) {
+            setSelectedSystemDevice(systemDevicesList[0].id);
+          }
         }
         
         console.log('Desktop mode fully initialized with audio devices');
@@ -141,6 +169,36 @@ export default function Home() {
     // Run detection immediately - no delay needed since we check global first
     checkTauri();
   }, []);
+
+  // Save device settings when they change (debounced)
+  useEffect(() => {
+    if (!isDesktopMode) return;
+    
+    // Wait for devices to be loaded
+    if (micDevices.length === 0 && systemDevices.length === 0) return;
+    
+    const saveTimeout = setTimeout(async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        
+        await invoke('save_device_settings', {
+          micDevice: selectedMicDevice || null,
+          systemAudioDevice: selectedSystemDevice || null,
+          captureMode: audioSourceType,
+        });
+        
+        console.log('Device settings saved:', {
+          micDevice: selectedMicDevice,
+          systemAudioDevice: selectedSystemDevice,
+          captureMode: audioSourceType,
+        });
+      } catch (err) {
+        console.error('Failed to save device settings:', err);
+      }
+    }, 1000); // Debounce save by 1 second
+    
+    return () => clearTimeout(saveTimeout);
+  }, [isDesktopMode, selectedMicDevice, selectedSystemDevice, audioSourceType]);
 
   const [realtimeConfig, setRealtimeConfig] = useState({
     baseUrl: 'http://10.61.46.95:10300',

@@ -1,6 +1,7 @@
 # SoulNotes Configuration
 # Copy this file to config.yml and customize as needed
 # For Docker: mount config.yml to /app/config.yml or /app/data/config.yml
+# For Tauri: place config.yml next to the executable
 
 # Speaches (Real-time Transcription) Settings
 speaches_base_url: "http://10.61.46.95:10300"
@@ -12,6 +13,12 @@ ollama_base_url: "http://10.61.46.95:10102"
 ollama_api_token: null  # Set if your Ollama requires authentication
 ollama_translate_model: "aya-expanse:latest"
 ollama_summarize_model: "phi4:latest"
+
+# Audio Device Settings (Tauri only - persists selected devices)
+# These are saved automatically when you select devices in the UI
+mic_device: null        # Microphone device name (e.g., "Microphone (USB)")
+system_audio_device: null  # System audio device name for loopback capture
+capture_mode: null      # "mic", "system", or "dual"
 
 # Custom Prompts
 # Use {source_language}, {target_language}, and {text} as placeholders

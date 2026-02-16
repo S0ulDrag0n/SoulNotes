@@ -28,6 +28,10 @@ pub struct AppConfig {
     pub ollama_summarize_model: Option<String>,
     pub translate_prompt: Option<String>,
     pub summarize_prompt: Option<String>,
+    // Audio device settings - persisted for user convenience
+    pub mic_device: Option<String>,
+    pub system_audio_device: Option<String>,
+    pub capture_mode: Option<String>, // "mic", "system", or "dual"
 }
 
 // State for dual audio capture
@@ -341,7 +345,42 @@ fn get_default_config() -> AppConfig {
         ollama_api_token: None,
         ollama_translate_model: Some("aya-expanse:latest".to_string()),
         ollama_summarize_model: Some("phi4:latest".to_string()),
+        translate_prompt: None,
+        summarize_prompt: None,
+        mic_device: None,
+        system_audio_device: None,
+        capture_mode: None,
     }
+}
+
+// Save device settings to config
+#[tauri::command]
+fn save_device_settings(
+    app: AppHandle,
+    mic_device: Option<String>,
+    system_audio_device: Option<String>,
+    capture_mode: Option<String>,
+) -> Result<(), String> {
+    let state = app.state::<AudioState>();
+    let mut config = state.config.lock().unwrap().clone();
+    
+    config.mic_device = mic_device;
+    config.system_audio_device = system_audio_device;
+    config.capture_mode = capture_mode;
+    
+    // Use the save_config logic
+    let config_path = get_config_path(&app);
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let yaml = serde_yaml::to_string(&config).map_err(|e| e.to_string())?;
+    fs::write(&config_path, yaml).map_err(|e| e.to_string())?;
+    
+    // Update in-memory config
+    *state.config.lock().unwrap() = config;
+    
+    log::info!("Device settings saved");
+    Ok(())
 }
 
 // Translate text using Ollama - streaming version for Tauri
@@ -620,6 +659,7 @@ pub fn run() {
         get_config,
         save_config,
         get_default_config,
+        save_device_settings,
         translate_text,
         summarize_text,
     ])
