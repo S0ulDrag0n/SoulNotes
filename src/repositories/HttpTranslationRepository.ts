@@ -7,7 +7,6 @@ import {
   TranslationRepository,
   TranslationRequest,
   TranslationChunk,
-  DEFAULT_CONFIG,
 } from '@/types';
 
 export class HttpTranslationRepository implements TranslationRepository {

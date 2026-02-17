@@ -29,7 +29,7 @@ export class HttpTranscriptionRepository implements TranscriptionRepository {
   // The caller should poll or use WebSocket for real-time
   async startStream(
     _language: LanguageCode,
-    _onTranscript: (text: string) => void
+    _onTranscript: (text: string) => void,
   ): Promise<void> {
     // HTTP fallback doesn't support streaming
     // Use transcribeFile() for batch transcription

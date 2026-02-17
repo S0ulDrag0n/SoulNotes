@@ -4,21 +4,25 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 
-// -----------------------------------------------------------------------------
+// Import from new architecture
+import {
+  extractTranslatableChunk,
+} from '@/utils/textProcessing';
+
+// -------------------------------------------------------------------------
 // Helper function to call backend APIs
-// -----------------------------------------------------------------------------
+// -------------------------------------------------------------------------
 async function streamTextFromApi(
   url: string,
   body: Record<string, string>,
   onChunk: (chunk: string) => void,
-  signal?: AbortSignal
+  _signal?: AbortSignal,
 ): Promise<string> {
   try {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      signal
     });
 
     if (!response.ok) {
@@ -456,37 +460,6 @@ const lastSummarizedTextRef = useRef('');
     element.scrollTop = element.scrollHeight;
   };
 
-  const normalizeTranslationText = (text: string) =>
-    text
-      .replace(/[ \t]+([.,!?;:])/g, '$1')
-      .replace(/([A-Za-z])\s+(['])/g, '$1$2')
-      .replace(/[ \t]{2,}/g, ' ')
-      .replace(/\s+\n/g, '\n')
-      .replace(/\n\s+/g, '\n');
-
-  const appendWithSpacing = (prev: string, next: string) => {
-    if (!prev) return next;
-    const prevEndsClean = /[\s\n.,!?;:，。！？；：)]$/.test(prev);
-    const nextStartsClean = /^[\s\n.,!?;:，。！？；：(]/.test(next);
-    if (prevEndsClean || nextStartsClean) {
-      return `${prev} ${next}`;
-    }
-    const prevEndsLatin = /[A-Za-z0-9)]$/.test(prev);
-    const nextStartsLatinUpper = /^[A-Z]/.test(next);
-    if (prevEndsLatin && nextStartsLatinUpper) {
-      return `${prev}. ${next}`;
-    }
-    const prevEndsCjk = /[\u4e00-\u9fff]$/.test(prev);
-    const nextStartsCjk = /^[\u4e00-\u9fff]/.test(next);
-    if (prevEndsCjk && nextStartsCjk) {
-      return `${prev}。${next}`;
-    }
-    return `${prev} ${next}`;
-  };
-
-  const appendWithCleanup = (prev: string, next: string) =>
-    normalizeTranslationText(appendWithSpacing(prev, next));
-
   const triggerNextTranslate = () => {
     if (inflightTranslatedTextRef.current) {
       return;
@@ -494,9 +467,7 @@ const lastSummarizedTextRef = useRef('');
     const maxChunkLength = 180;
     const { chunk, rest } = extractTranslatableChunk(
       pendingTranslateBufferRef.current,
-      false,
-      true,
-      maxChunkLength
+      { isIdle: false, intervalElapsed: true, maxChunkLength }
     );
     if (!chunk) {
       pendingTranslateBufferRef.current = rest;
@@ -516,27 +487,6 @@ const lastSummarizedTextRef = useRef('');
         }
       }
     });
-  };
-
-  const extractTranslatableChunk = (
-    buffer: string,
-    isIdle: boolean,
-    intervalElapsed: boolean,
-    maxChunkLength: number
-  ) => {
-    const trimmed = buffer.replace(/^\s+/, '');
-    if (!trimmed) {
-      return { chunk: '', rest: '' };
-    }
-    if (!isIdle && !intervalElapsed) {
-      return { chunk: '', rest: trimmed };
-    }
-    if (isIdle) {
-      return { chunk: trimmed, rest: '' };
-    }
-    const chunk = trimmed.slice(0, maxChunkLength);
-    const rest = trimmed.slice(chunk.length).replace(/^\s+/, '');
-    return { chunk, rest };
   };
 
   useEffect(() => {
@@ -770,11 +720,11 @@ const lastSummarizedTextRef = useRef('');
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaRecorderRef.current = new MediaRecorder(stream);
 
-        mediaRecorderRef.current.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) {
+        mediaRecorderRef.current.ondataavailable = (_event) => {
+          if (_event.data && _event.data.size > 0) {
             setIsProcessing(true);
             transcriptionQueueRef.current = transcriptionQueueRef.current
-              .then(() => sendAudioChunk(event.data))
+              .then(() => sendAudioChunk(_event.data))
               .catch((queueErr) => {
                 console.error('Audio processing error:', queueErr);
               })
@@ -853,7 +803,8 @@ const lastSummarizedTextRef = useRef('');
   // -------------------------------------------------------
   // Translate using backend API or Tauri invoke (desktop mode)
   // -------------------------------------------------------
-  const translate = async (requestId: number, text: string, shouldAppend: boolean) => {
+  const translate = async (requestId: number, text: string, _shouldAppend: boolean) => {
+    // Note: shouldAppend is kept for API consistency but not used since we always append
     try {
       let hasStarted = false;
       let accumulatedText = '';
@@ -1009,9 +960,7 @@ const lastSummarizedTextRef = useRef('');
       const maxChunkLength = 180;
       const { chunk, rest } = extractTranslatableChunk(
         pendingTranslateBufferRef.current,
-        isIdle,
-        intervalElapsed,
-        maxChunkLength
+        { isIdle, intervalElapsed, maxChunkLength }
       );
       if (!chunk) {
         pendingTranslateBufferRef.current = rest;
@@ -1280,9 +1229,9 @@ const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
                   Source Language
                   <select
                     value={selectedLanguage}
-                    onChange={(event) => {
+                onChange={(_event) => {
                       languageTouchedRef.current = true;
-                      const value = event.target.value;
+                      const value = _event.target.value;
                       if (value === 'zh-simplified') {
                         setRealtimeLanguage('zh');
                         setChineseVariant('simplified');
@@ -1445,8 +1394,8 @@ const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
               </div>
               <div
                 ref={transcriptScrollRef}
-                onScroll={(event) => {
-                  const element = event.currentTarget;
+                onScroll={(_event) => {
+                  const element = _event.currentTarget;
                   transcriptAutoScrollRef.current = isNearBottom(element);
                 }}
                 className="mt-4 min-h-[160px] max-h-[min(45vh,360px)] overflow-auto"
@@ -1509,7 +1458,7 @@ const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
                   Target Language
                   <select
                     value={targetLanguage}
-                    onChange={(event) => setTargetLanguage(event.target.value)}
+                onChange={(_event) => setTargetLanguage(_event.target.value)}
                     className="rounded-xl border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
                   >
                     <option value="en">English</option>
@@ -1572,8 +1521,8 @@ const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
 
               <div
                 ref={outputScrollRef}
-                onScroll={(event) => {
-                  const element = event.currentTarget;
+                onScroll={(_event) => {
+                  const element = _event.currentTarget;
                   outputAutoScrollRef.current = isNearBottom(element);
                 }}
                 className="mt-6 min-h-[280px] max-h-[min(55vh,520px)] overflow-auto"
@@ -1618,20 +1567,20 @@ const handleSaveTranscript = () => saveToFile(transcript, 'transcript.md');
                 ) : summary ? (
                   <ReactMarkdown
                     components={{
-                      ul: ({ node, ...props }) => (
+                      ul: ({ ...props }) => (
                         <ul className="list-disc list-inside space-y-1" {...props} />
                       ),
-                      ol: ({ node, ...props }) => (
+                      ol: ({ ...props }) => (
                         <ol className="list-decimal list-inside space-y-1" {...props} />
                       ),
-                      p: ({ node, ...props }) => <p className="mb-3" {...props} />,
-                      h1: ({ node, ...props }) => (
+                      p: ({ ...props }) => <p className="mb-3" {...props} />,
+                      h1: ({ ...props }) => (
                         <h1 className="text-lg font-semibold mb-2" {...props} />
                       ),
-                      h2: ({ node, ...props }) => (
+                      h2: ({ ...props }) => (
                         <h2 className="text-base font-semibold mb-2" {...props} />
                       ),
-                      h3: ({ node, ...props }) => (
+                      h3: ({ ...props }) => (
                         <h3 className="text-sm font-semibold mb-2" {...props} />
                       )
                     }}

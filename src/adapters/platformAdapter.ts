@@ -16,7 +16,6 @@ import {
 import {
   LocalConfigRepository,
   TauriConfigRepository,
-  HttpTranscriptionRepository,
   WebSocketTranscriptionRepository,
   HttpTranslationRepository,
   HttpSummarizationRepository,

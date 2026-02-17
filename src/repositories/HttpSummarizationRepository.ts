@@ -3,7 +3,7 @@
  * 
  * Connects to /api/summarize endpoint for generating meeting summaries.
  */
-import { SummarizationRepository, DEFAULT_CONFIG } from '@/types';
+import { SummarizationRepository } from '@/types';
 
 export class HttpSummarizationRepository implements SummarizationRepository {
   private abortController: AbortController | null = null;

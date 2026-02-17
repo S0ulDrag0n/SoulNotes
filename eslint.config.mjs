@@ -13,6 +13,21 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  // Custom rules
+  {
+    rules: {
+      // Allow unused vars with underscore prefix
+      "@typescript-eslint/no-unused-vars": ["error", {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }],
+      // Allow certain exhaustive-deps patterns that are intentional
+      "react-hooks/exhaustive-deps": ["warn", {
+        "enableDangerousAutofixThisMayCauseInfiniteLoops": false
+      }]
+    }
+  }
 ]);
 
 export default eslintConfig;
