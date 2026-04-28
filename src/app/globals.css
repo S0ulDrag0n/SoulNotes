@@ -1,0 +1,194 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-space-grotesk);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-space-grotesk), "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Card flip animation */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+/* XP popup animation */
+@keyframes xp-popup {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-10px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+}
+
+.xp-popup {
+  animation: xp-popup 1.5s ease-out forwards;
+}
+
+/* Achievement unlock animation */
+@keyframes achievement-unlock {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.achievement-unlock {
+  animation: achievement-unlock 0.5s ease-out forwards;
+}
+
+/* Level up celebration */
+@keyframes level-up {
+  0%, 100% {
+    transform: scale(1);
+  }
+  25% {
+    transform: scale(1.1);
+  }
+  50% {
+    transform: scale(1);
+  }
+  75% {
+    transform: scale(1.05);
+  }
+}
+
+.level-up {
+  animation: level-up 0.8s ease-in-out;
+}
+
+/* Streak fire animation */
+@keyframes fire-flicker {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+  }
+  25% {
+    transform: scale(1.1) rotate(-5deg);
+  }
+  50% {
+    transform: scale(0.95) rotate(5deg);
+  }
+  75% {
+    transform: scale(1.05) rotate(-3deg);
+  }
+}
+
+.fire-flicker {
+  animation: fire-flicker 0.5s ease-in-out infinite;
+}
+
+/* Progress bar shine */
+@keyframes progress-shine {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.progress-shine {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: progress-shine 2s ease-in-out infinite;
+}
+
+/* Notification slide-in animation */
+@keyframes slide-in-right {
+  0% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out forwards;
+}
+
+/* Level up celebration animation */
+@keyframes celebrate {
+  0% {
+    transform: scale(0.5) rotate(-10deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2) rotate(5deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+.animate-celebrate {
+  animation: celebrate 0.6s ease-out forwards;
+}
+
+/* Confetti animation */
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(-100%) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+.confetti {
+  position: fixed;
+  width: 10px;
+  height: 10px;
+  top: -10px;
+  animation: confetti-fall 3s ease-in-out forwards;
+}
