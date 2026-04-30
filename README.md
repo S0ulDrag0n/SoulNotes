@@ -73,15 +73,15 @@ docker build -t soulnotes:latest .
 
 # Run the container
 docker run --rm -p 3000:3000 \
-  -e SPEACHES_BASE_URL=http://10.61.46.95:10300 \
+  -e SPEACHES_BASE_URL=http://127.0.0.1:10300 \
   -e SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
   -e SPEACHES_TRANSCRIBE_LANGUAGE=zh \
-  -e OLLAMA_BASE_URL=http://10.61.46.95:10102 \
+  -e OLLAMA_BASE_URL=http://127.0.0.1:10102 \
   -e OLLAMA_API_TOKEN=your_token_here \
   -e OLLAMA_TRANSLATE_MODEL=aya-expanse:latest \
   -e OLLAMA_SUMMARIZE_MODEL=phi4:latest \
   -e OLLAMA_CONVERSATION_MODEL=aya-expanse:latest \
-  -e NEXT_PUBLIC_SPEACHES_BASE_URL=http://10.61.46.95:10300 \
+  -e NEXT_PUBLIC_SPEACHES_BASE_URL=http://127.0.0.1:10300 \
   -e NEXT_PUBLIC_SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
   -e NEXT_PUBLIC_SPEACHES_TTS_MODEL=kokoro-tts \
   soulnotes:latest
@@ -95,12 +95,12 @@ Create a `.env.local` file with the following variables:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OLLAMA_BASE_URL` | Ollama API endpoint | `http://10.61.46.95:10102` |
+| `OLLAMA_BASE_URL` | Ollama API endpoint | `http://127.0.0.1:10102` |
 | `OLLAMA_API_TOKEN` | Ollama API token | (none) |
 | `OLLAMA_TRANSLATE_MODEL` | Translation model | `aya-expanse:latest` |
 | `OLLAMA_SUMMARIZE_MODEL` | Summarization model | `phi4:latest` |
 | `OLLAMA_CONVERSATION_MODEL` | AI conversation partner model | `aya-expanse:latest` |
-| `SPEACHES_BASE_URL` | Speeches API endpoint (server) | `http://10.61.46.95:10300` |
+| `SPEACHES_BASE_URL` | Speeches API endpoint (server) | `http://127.0.0.1:10300` |
 | `SPEACHES_TRANSCRIBE_MODEL` | Transcription model | `Systran/faster-whisper-large-v3` |
 | `SPEACHES_TRANSCRIBE_LANGUAGE` | Source language code | `zh` |
 
@@ -110,7 +110,7 @@ These variables are exposed to the browser and are required for realtime transcr
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `NEXT_PUBLIC_SPEACHES_BASE_URL` | Speeches API endpoint (client) | `http://10.61.46.95:10300` |
+| `NEXT_PUBLIC_SPEACHES_BASE_URL` | Speeches API endpoint (client) | `http://127.0.0.1:10300` |
 | `NEXT_PUBLIC_SPEACHES_TRANSCRIBE_MODEL` | Realtime transcription model | `Systran/faster-whisper-large-v3` |
 | `NEXT_PUBLIC_SPEACHES_TTS_MODEL` | Text-to-speech model | `kokoro-tts` |
 
