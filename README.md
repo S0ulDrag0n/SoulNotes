@@ -204,3 +204,7 @@ summarize_prompt: |
 3. **Include Examples**: For complex outputs, include example format
 4. **Test Iteratively**: Refine prompts based on actual output quality
 5. **Model Considerations**: Larger models handle complex prompts better; simpler prompts may work better for smaller models
+
+## Contributing
+
+Contributions are welcome! Please feel free to open issues or submit pull requests on the repository.
