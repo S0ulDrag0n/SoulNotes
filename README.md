@@ -207,4 +207,4 @@ summarize_prompt: |
 
 ## Contributing
 
-Contributions are welcome! Please feel free to open issues or submit pull requests on the repository.
+Contributions are welcome! Please feel free to open issues or submit pull requests on the repository.   
