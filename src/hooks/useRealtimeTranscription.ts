@@ -6,7 +6,7 @@ import { generateMessageId } from '@/utils/text';
 import { REALTIME_AUDIO, REALTIME_SESSION_INSTRUCTIONS, WEBSOCKET_CONFIG } from '@/lib/constants';
 import { useNotifications } from '@/contexts/NotificationContext';
 import type { DebugCategory } from '@/types/notifications';
-import { getVadService, downsample24to16 } from '@/lib/vad-service';
+import { getVadService, downsample24to16, upsample16to24 } from '@/lib/vad-service';
 
 export interface TranscriptMessage {
   id: string;
@@ -642,9 +642,9 @@ export function useRealtimeTranscription(
         if (vadResult.speechStart) {
           const preBuffer = vadService.getAndClearPreBuffer();
           if (preBuffer.length > 0) {
-            // Send pre-buffer (this is 16kHz, but Whisper handles it fine)
-            // Note: pre-buffer is at 16kHz, but we send it anyway - Whisper is robust
-            const preBufferBase64 = int16ToBase64(preBuffer);
+            // Pre-buffer is at 16kHz (VAD sample rate) — upsample to 24kHz for Whisper
+            const preBuffer24k = upsample16to24(preBuffer);
+            const preBufferBase64 = int16ToBase64(preBuffer24k);
             wsRef.current.send(
               JSON.stringify({ type: 'input_audio_buffer.append', audio: preBufferBase64 })
             );
