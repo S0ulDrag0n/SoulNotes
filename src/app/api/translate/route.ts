@@ -1,4 +1,3 @@
-import { Ollama } from 'ollama';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import {
@@ -7,6 +6,7 @@ import {
   LANGUAGE_LABELS,
   CONFIG_PATHS,
 } from '@/lib/constants';
+import { LLMClient, buildLLMConfig } from '@/lib/llm-client';
 
 type TranslateRequest = {
   text?: string;
@@ -15,19 +15,18 @@ type TranslateRequest = {
   context?: string; // Optional context for more accurate translation
 };
 
-type AppConfig = {
+type RawAppConfig = {
+  llm_provider?: string;
   ollama_base_url?: string;
   ollama_api_token?: string;
   ollama_translate_model?: string;
+  openai_compatible_base_url?: string;
+  openai_compatible_api_token?: string;
+  openai_compatible_translate_model?: string;
   translate_prompt?: string;
 };
 
-const resolveLanguageLabel = (code?: string) => {
-  if (!code) return 'English';
-  return LANGUAGE_LABELS[code] ?? code;
-};
-
-function loadConfig(): AppConfig {
+function loadConfig(): RawAppConfig {
   const configPaths = [
     join(process.cwd(), CONFIG_PATHS.primary),
     join(process.cwd(), CONFIG_PATHS.secondary),
@@ -38,7 +37,7 @@ function loadConfig(): AppConfig {
     if (existsSync(configPath)) {
       try {
         const content = readFileSync(configPath, 'utf-8');
-        const config: AppConfig = {};
+        const config: RawAppConfig = {};
         const lines = content.split('\n');
         
         for (const line of lines) {
@@ -58,9 +57,14 @@ function loadConfig(): AppConfig {
           
           if (value === 'null' || value === '~') continue;
           
-          if (key === 'ollama_base_url') config.ollama_base_url = value;
-          if (key === 'ollama_api_token') config.ollama_api_token = value;
-          if (key === 'ollama_translate_model') config.ollama_translate_model = value;
+          const knownKeys = [
+            'llm_provider', 'ollama_base_url', 'ollama_api_token',
+            'ollama_translate_model', 'openai_compatible_base_url',
+            'openai_compatible_api_token', 'openai_compatible_translate_model',
+          ];
+          if (knownKeys.includes(key)) {
+            (config as Record<string, string>)[key] = value;
+          }
           if (key === 'translate_prompt' && !value.startsWith('|')) {
             config.translate_prompt = value;
           }
@@ -84,14 +88,16 @@ export async function POST(req: Request) {
     return new Response('Missing text', { status: 400 });
   }
 
-  // Load config
-  const config = loadConfig();
+  // Load config and build LLM client
+  const rawConfig = loadConfig();
+  const llmConfig = buildLLMConfig(rawConfig);
+  const llm = new LLMClient(llmConfig);
   
-  const sourceLabel = resolveLanguageLabel(sourceLanguage);
-  const targetLabel = resolveLanguageLabel(targetLanguage);
+  const sourceLabel = LANGUAGE_LABELS[sourceLanguage ?? ''] ?? sourceLanguage ?? 'English';
+  const targetLabel = LANGUAGE_LABELS[targetLanguage ?? ''] ?? targetLanguage ?? 'English';
   
   // Use configured prompt or default
-  const promptTemplate = config.translate_prompt ?? DEFAULT_TRANSLATE_PROMPT;
+  const promptTemplate = rawConfig.translate_prompt ?? DEFAULT_TRANSLATE_PROMPT;
   
   // Build prompt with optional context
   let prompt = promptTemplate
@@ -104,34 +110,16 @@ export async function POST(req: Request) {
     prompt = `Context: ${context}\n\n${prompt}`;
   }
 
-  const ollamaHeaders: Record<string, string> = {};
-  const apiToken = process.env.OLLAMA_API_TOKEN ?? config.ollama_api_token;
-  if (apiToken) {
-    ollamaHeaders['Authorization'] = `Bearer ${apiToken}`;
-  }
-
-  const ollama = new Ollama({
-    host: process.env.OLLAMA_BASE_URL ?? config.ollama_base_url ?? DEFAULT_OLLAMA_CONFIG.baseUrl,
-    headers: ollamaHeaders,
-  });
-
   try {
-    const response = await ollama.chat({
-      model: process.env.OLLAMA_TRANSLATE_MODEL ?? config.ollama_translate_model ?? DEFAULT_OLLAMA_CONFIG.translateModel,
-      messages: [{ role: 'user', content: prompt }],
-      stream: true,
-      think: false,
-    });
-
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
-          for await (const part of response) {
-            const chunk = part?.message?.content ?? '';
-            if (chunk) {
-              controller.enqueue(encoder.encode(chunk));
+          for await (const chunk of llm.translateStream([{ role: 'user', content: prompt }])) {
+            if (chunk.content) {
+              controller.enqueue(encoder.encode(chunk.content));
             }
+            if (chunk.done) break;
           }
           controller.close();
         } catch (error) {

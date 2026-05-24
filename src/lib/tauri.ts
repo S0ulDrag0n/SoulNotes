@@ -145,6 +145,7 @@ export const tauriAudioDeviceService: IAudioDeviceService = {
   },
 
   async getConfig(): Promise<{
+    llm_provider?: string;
     mic_device?: string;
     system_audio_device?: string;
     capture_mode?: string;
@@ -153,6 +154,11 @@ export const tauriAudioDeviceService: IAudioDeviceService = {
     ollama_translate_model?: string;
     ollama_summarize_model?: string;
     ollama_conversation_model?: string;
+    openai_compatible_base_url?: string;
+    openai_compatible_api_token?: string;
+    openai_compatible_translate_model?: string;
+    openai_compatible_summarize_model?: string;
+    openai_compatible_conversation_model?: string;
     speaches_base_url?: string;
     speaches_transcribe_model?: string;
     speaches_transcribe_language?: string;
@@ -160,6 +166,7 @@ export const tauriAudioDeviceService: IAudioDeviceService = {
     const { invoke } = await getTauri();
     try {
       return await invoke<{
+        llm_provider?: string;
         mic_device?: string;
         system_audio_device?: string;
         capture_mode?: string;
@@ -168,6 +175,11 @@ export const tauriAudioDeviceService: IAudioDeviceService = {
         ollama_translate_model?: string;
         ollama_summarize_model?: string;
         ollama_conversation_model?: string;
+        openai_compatible_base_url?: string;
+        openai_compatible_api_token?: string;
+        openai_compatible_translate_model?: string;
+        openai_compatible_summarize_model?: string;
+        openai_compatible_conversation_model?: string;
         speaches_base_url?: string;
         speaches_transcribe_model?: string;
         speaches_transcribe_language?: string;

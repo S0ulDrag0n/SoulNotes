@@ -1,21 +1,24 @@
-import { Ollama } from 'ollama';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { DEFAULT_OLLAMA_CONFIG, DEFAULT_SUMMARIZE_PROMPT, CONFIG_PATHS } from '@/lib/constants';
+import { DEFAULT_SUMMARIZE_PROMPT, CONFIG_PATHS } from '@/lib/constants';
+import { LLMClient, buildLLMConfig } from '@/lib/llm-client';
 
 type SummarizeRequest = {
   text?: string;
 };
 
-type AppConfig = {
+type RawAppConfig = {
+  llm_provider?: string;
   ollama_base_url?: string;
   ollama_api_token?: string;
   ollama_summarize_model?: string;
+  openai_compatible_base_url?: string;
+  openai_compatible_api_token?: string;
+  openai_compatible_summarize_model?: string;
   summarize_prompt?: string;
 };
 
-
-function loadConfig(): AppConfig {
+function loadConfig(): RawAppConfig {
   const configPaths = [
     join(process.cwd(), CONFIG_PATHS.primary),
     join(process.cwd(), CONFIG_PATHS.secondary),
@@ -26,7 +29,7 @@ function loadConfig(): AppConfig {
     if (existsSync(configPath)) {
       try {
         const content = readFileSync(configPath, 'utf-8');
-        const config: AppConfig = {};
+        const config: RawAppConfig = {};
         const lines = content.split('\n');
         
         for (const line of lines) {
@@ -46,9 +49,14 @@ function loadConfig(): AppConfig {
           
           if (value === 'null' || value === '~') continue;
           
-          if (key === 'ollama_base_url') config.ollama_base_url = value;
-          if (key === 'ollama_api_token') config.ollama_api_token = value;
-          if (key === 'ollama_summarize_model') config.ollama_summarize_model = value;
+          const knownKeys = [
+            'llm_provider', 'ollama_base_url', 'ollama_api_token',
+            'ollama_summarize_model', 'openai_compatible_base_url',
+            'openai_compatible_api_token', 'openai_compatible_summarize_model',
+          ];
+          if (knownKeys.includes(key)) {
+            (config as Record<string, string>)[key] = value;
+          }
           if (key === 'summarize_prompt' && !value.startsWith('|')) {
             config.summarize_prompt = value;
           }
@@ -71,33 +79,18 @@ export async function POST(req: Request) {
     return new Response('Missing text', { status: 400 });
   }
 
-  // Load config
-  const config = loadConfig();
+  // Load config and build LLM client
+  const rawConfig = loadConfig();
+  const llmConfig = buildLLMConfig(rawConfig);
+  const llm = new LLMClient(llmConfig);
   
   // Use configured prompt or default
-  const promptTemplate = config.summarize_prompt ?? DEFAULT_SUMMARIZE_PROMPT;
+  const promptTemplate = rawConfig.summarize_prompt ?? DEFAULT_SUMMARIZE_PROMPT;
   const prompt = promptTemplate.replace(/{text}/g, text);
 
-  const ollamaHeaders: Record<string, string> = {};
-  const apiToken = process.env.OLLAMA_API_TOKEN ?? config.ollama_api_token;
-  if (apiToken) {
-    ollamaHeaders['Authorization'] = `Bearer ${apiToken}`;
-  }
-
-  const ollama = new Ollama({
-    host: process.env.OLLAMA_BASE_URL ?? config.ollama_base_url ?? DEFAULT_OLLAMA_CONFIG.baseUrl,
-    headers: ollamaHeaders,
-  });
-
   try {
-    const response = await ollama.chat({
-      model: process.env.OLLAMA_SUMMARIZE_MODEL ?? config.ollama_summarize_model ?? DEFAULT_OLLAMA_CONFIG.summarizeModel,
-      messages: [{ role: 'user', content: prompt }],
-      think: false,
-    });
-    
-    const content = response.message?.content ?? '';
-    return new Response(content, {
+    const response = await llm.summarize([{ role: 'user', content: prompt }]);
+    return new Response(response.content, {
       headers: { 'Content-Type': 'text/plain' }
     });
   } catch (err) {
