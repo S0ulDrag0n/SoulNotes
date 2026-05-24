@@ -659,11 +659,13 @@ export function useRealtimeTranscription(
       } catch (error) {
         console.error('[RealtimeTranscription] VAD inference error, passing audio through:', error);
         // On VAD error, pass audio through (fallback behavior)
-        lastAudioSentTimeRef.current = Date.now();
-        const base64 = int16ToBase64(pcm16);
-        wsRef.current.send(
-          JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 })
-        );
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          lastAudioSentTimeRef.current = Date.now();
+          const base64 = int16ToBase64(pcm16);
+          wsRef.current.send(
+            JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 })
+          );
+        }
       }
     } else {
       // VAD not ready or disabled — send all audio directly (passthrough)

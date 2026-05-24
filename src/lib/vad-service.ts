@@ -232,8 +232,15 @@ export class VadService {
    * @returns VAD result with speech detection state
    */
   async processInt16(pcm16: Int16Array): Promise<VADResult> {
-    if (!this.initialized) {
-      await this.initialize();
+    if (!this.initialized || !this.session) {
+      // Not ready — return "speech detected" as passthrough
+      // Caller should send audio directly when VAD isn't available
+      return {
+        isSpeech: true,
+        confidence: 1.0,
+        speechStart: false,
+        speechEnd: false,
+      };
     }
 
     // Add to pre-buffer
