@@ -422,7 +422,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div 
-        className="w-full max-w-lg rounded-2xl border border-black/10 bg-white p-6 shadow-xl dark:border-white/10 dark:bg-[#1a1611]"
+        className="w-full max-w-xl rounded-2xl border border-black/10 bg-white p-6 shadow-xl dark:border-white/10 dark:bg-[#1a1611]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-modal-title"
