@@ -663,9 +663,12 @@ export function useRealtimeTranscription(
         // speech segment.
         if (vadResult.speechEnd) {
           vadService.reset();
-          // Commit the audio buffer so the server processes the utterance
+          // Commit the audio buffer so the server processes the utterance,
+          // then clear any residual audio to prevent Whisper hallucinations
+          // (repeating garbage like "press again" on silence/noise).
           if (wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+            wsRef.current.send(JSON.stringify({ type: 'input_audio_buffer.clear' }));
           }
         }
       } catch (error) {
