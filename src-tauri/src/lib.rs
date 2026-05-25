@@ -876,6 +876,45 @@ async fn fetch_openai_compatible_models(base_url: String, api_token: Option<Stri
     Ok(models)
 }
 
+/// Fetch available models from a Speaches server (OpenAI-compatible /v1/models)
+#[tauri::command]
+async fn fetch_speaches_models(base_url: String, _api_token: Option<String>) -> Result<Vec<ModelInfo>, String> {
+    let client = reqwest::Client::new();
+    let normalized_url = base_url.trim_end_matches('/');
+    let normalized_url = normalized_url.strip_suffix("/v1").unwrap_or(normalized_url);
+    let url = format!("{}/v1/models", normalized_url);
+    
+    // Speaches doesn't require auth, but we accept the arg for API consistency
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect to Speaches server: {}", e))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Speaches API error ({}): {}", status, error_text));
+    }
+    
+    // Speaches returns the same OpenAI-style format
+    let body: OpenAIModelsResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Speaches response: {}", e))?;
+    
+    let models = body.data
+        .into_iter()
+        .map(|m| ModelInfo {
+            id: m.id.clone(),
+            name: m.id,
+            provider: "speaches".to_string(),
+        })
+        .collect();
+    
+    Ok(models)
+}
+
 // Save device settings to config
 #[tauri::command]
 fn save_device_settings(
@@ -1571,6 +1610,7 @@ pub fn run() {
         get_default_config,
         fetch_ollama_models,
         fetch_openai_compatible_models,
+        fetch_speaches_models,
         save_device_settings,
         translate_text,
         summarize_text,
