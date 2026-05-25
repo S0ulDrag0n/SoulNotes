@@ -6,7 +6,8 @@ import { generateMessageId } from '@/utils/text';
 import { REALTIME_AUDIO, REALTIME_SESSION_INSTRUCTIONS, WEBSOCKET_CONFIG } from '@/lib/constants';
 import { useNotifications } from '@/contexts/NotificationContext';
 import type { DebugCategory } from '@/types/notifications';
-import { getVadService, downsample24to16 } from '@/lib/vad-service';
+import { getVadService, downsample24to16, upsample16to24 } from '@/lib/vad-service';
+import { isHallucination } from '@/lib/hallucination-filter';
 
 export interface TranscriptMessage {
   id: string;
@@ -66,7 +67,6 @@ export function useRealtimeTranscription(
   // VAD state
   const vadInitializedRef = useRef<boolean>(false);
   const vadSpeechStateRef = useRef<boolean>(false);
-  const vadPreBufferRef = useRef<Int16Array[]>([]);
 
   // Keepalive and health monitoring refs
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -102,6 +102,12 @@ export function useRealtimeTranscription(
   const appendTranscript = useCallback((text: string, isFinal: boolean = true) => {
     const trimmed = text.trim();
     if (!trimmed) return;
+
+    // Filter hallucinations on final transcripts
+    if (isFinal && isHallucination(trimmed)) {
+      console.warn('[RealtimeTranscription] Filtered hallucination:', trimmed.substring(0, 100));
+      return;
+    }
 
     if (isFinal) {
       const newMessage: TranscriptMessage = {
@@ -264,17 +270,16 @@ export function useRealtimeTranscription(
     // Clear intervals and timeouts
     clearTimers();
 
-    // Reset VAD state
+    // Reset VAD state (full reset when stopping capture)
     if (vadInitializedRef.current) {
       try {
         const vadService = getVadService();
-        vadService.reset();
+        vadService.resetFull();
       } catch {
         // Ignore VAD cleanup errors
       }
     }
     vadSpeechStateRef.current = false;
-    vadPreBufferRef.current = [];
 
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       try {
@@ -614,26 +619,14 @@ export function useRealtimeTranscription(
       return;
     }
     
-    // VAD filtering
-    if (useVAD) {
-      console.error('[RealtimeTranscription] VAD enabled, processing audio chunk');
+    // VAD filtering (desktop/Tauri path only)
+    if (useVAD && vadInitializedRef.current) {
+      // VAD is ready — filter audio through Silero
       try {
-        // Initialize VAD if not already done
-        if (!vadInitializedRef.current) {
-          console.error('[RealtimeTranscription] Initializing VAD service...');
-          const vadService = getVadService();
-          await vadService.initialize();
-          vadInitializedRef.current = true;
-          console.error('[RealtimeTranscription] VAD service initialized');
-        }
-
         const vadService = getVadService();
         
         // Downsample from 24kHz to 16kHz for VAD
         const audio16k = downsample24to16(pcm16);
-        
-        // Add to pre-buffer (for capturing audio before speech starts)
-        vadService.addToPreBuffer(audio16k);
         
         // Process through VAD
         const vadResult = await vadService.processInt16(audio16k);
@@ -642,17 +635,20 @@ export function useRealtimeTranscription(
         if (vadResult.speechStart) {
           const preBuffer = vadService.getAndClearPreBuffer();
           if (preBuffer.length > 0) {
-            // Send pre-buffer (this is 16kHz, but Whisper handles it fine)
-            // Note: pre-buffer is at 16kHz, but we send it anyway - Whisper is robust
-            const preBufferBase64 = int16ToBase64(preBuffer);
-            wsRef.current.send(
-              JSON.stringify({ type: 'input_audio_buffer.append', audio: preBufferBase64 })
-            );
+            // Pre-buffer is at 16kHz (VAD sample rate) — upsample to 24kHz for Whisper
+            const preBuffer24k = upsample16to24(preBuffer);
+            const preBufferBase64 = int16ToBase64(preBuffer24k);
+            if (wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(
+                JSON.stringify({ type: 'input_audio_buffer.append', audio: preBufferBase64 })
+              );
+            }
           }
         }
         
-        // Only send audio if speech is detected
-        if (!vadResult.isSpeech && !vadResult.speechStart) {
+        // Send audio if speech is detected OR this is the final chunk where speech ends.
+        // On speechEnd, isSpeech is false but we still need to send this last chunk.
+        if (!vadResult.isSpeech && !vadResult.speechStart && !vadResult.speechEnd) {
           // Don't send silence to transcription
           return;
         }
@@ -662,25 +658,39 @@ export function useRealtimeTranscription(
         
         // Convert Int16Array to base64 and send
         const base64 = int16ToBase64(pcm16);
-        wsRef.current.send(
-          JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 })
-        );
+        if (wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 })
+          );
+        }
         
-        // Reset VAD state when speech ends
+        // When speech ends: reset debounce counters and commit audio buffer
+        // so the server finalizes the utterance. Do NOT reset model state —
+        // the Silero model needs its hidden state to stay warm for the next
+        // speech segment.
         if (vadResult.speechEnd) {
           vadService.reset();
+          // Commit the audio buffer so the server processes the utterance,
+          // then clear any residual audio to prevent Whisper hallucinations
+          // (repeating garbage like "press again" on silence/noise).
+          if (wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+            wsRef.current.send(JSON.stringify({ type: 'input_audio_buffer.clear' }));
+          }
         }
       } catch (error) {
-        console.error('[RealtimeTranscription] VAD error, passing audio through:', error);
+        console.error('[RealtimeTranscription] VAD inference error, passing audio through:', error);
         // On VAD error, pass audio through (fallback behavior)
-        lastAudioSentTimeRef.current = Date.now();
-        const base64 = int16ToBase64(pcm16);
-        wsRef.current.send(
-          JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 })
-        );
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          lastAudioSentTimeRef.current = Date.now();
+          const base64 = int16ToBase64(pcm16);
+          wsRef.current.send(
+            JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 })
+          );
+        }
       }
     } else {
-      // VAD disabled, send all audio
+      // VAD not ready or disabled — send all audio directly (passthrough)
       lastAudioSentTimeRef.current = Date.now();
       const base64 = int16ToBase64(pcm16);
       wsRef.current.send(
@@ -742,6 +752,21 @@ export function useRealtimeTranscription(
         sendSessionUpdate(ws, language);
         startKeepalive();
         setIsRealtime(true);
+
+        // Start loading VAD model in background (don't await — audio passes through until ready)
+        if (useVAD) {
+          console.error('[RealtimeTranscription] Starting VAD model initialization...');
+          const vadService = getVadService();
+          vadService.initialize()
+            .then(() => {
+              vadInitializedRef.current = true;
+              console.error('[RealtimeTranscription] VAD service initialized successfully');
+            })
+            .catch((err) => {
+              console.error('[RealtimeTranscription] VAD initialization failed, audio will pass through without VAD:', err);
+              vadInitializedRef.current = false;
+            });
+        }
       }
       
       // Start health check after successful connection
