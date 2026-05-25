@@ -447,8 +447,10 @@ export const VAD_CONFIG = {
   threshold: 0.5,
   /** Minimum speech duration in ms to trigger speech start */
   minSpeechDurationMs: 250,
-  /** Minimum silence duration in ms to trigger speech end */
-  minSilenceDurationMs: 100,
+  /** Minimum silence duration in ms to trigger speech end
+   *  600ms prevents false triggers from natural pauses (breathing, hesitations)
+   *  while still being responsive enough to finalize utterances */
+  minSilenceDurationMs: 600,
   /** VAD model sample rate (Silero requires 8kHz or 16kHz) */
   sampleRate: 16000,
   /** Frame size in samples for VAD processing (512, 768, or 1024 for 16kHz) */

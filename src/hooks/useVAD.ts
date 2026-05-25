@@ -45,8 +45,10 @@ export interface UseVADReturn {
   initialize: () => Promise<void>;
   /** Process audio chunk and return speech detection result */
   processAudio: (pcm16: Int16Array, sampleRate: number) => Promise<VADResult>;
-  /** Reset VAD state */
+  /** Reset debounce state (between speech segments) */
   reset: () => void;
+  /** Full reset including model state (when stopping capture) */
+  resetFull: () => void;
   /** Enable/disable VAD */
   setEnabled: (enabled: boolean) => void;
   /** Get pre-buffered audio (audio before speech started) */
@@ -188,6 +190,14 @@ export function useVAD(options: UseVADOptions = {}): UseVADReturn {
     lastSpeechStateRef.current = false;
   }, []);
 
+  const resetFull = useCallback(() => {
+    if (vadServiceRef.current) {
+      vadServiceRef.current.resetFull();
+    }
+    setIsSpeech(false);
+    lastSpeechStateRef.current = false;
+  }, []);
+
   // Enable/disable VAD
   const setEnabled = useCallback((newEnabled: boolean) => {
     setIsEnabled(newEnabled);
@@ -208,9 +218,9 @@ export function useVAD(options: UseVADOptions = {}): UseVADReturn {
   useEffect(() => {
     return () => {
       // Don't dispose the singleton on unmount - it can be reused
-      // Just reset the state
+      // Full reset including model hidden state since we're done with this capture session
       if (vadServiceRef.current) {
-        vadServiceRef.current.reset();
+        vadServiceRef.current.resetFull();
       }
     };
   }, []);
@@ -222,6 +232,7 @@ export function useVAD(options: UseVADOptions = {}): UseVADReturn {
     initialize,
     processAudio,
     reset,
+    resetFull,
     setEnabled,
     getPreBuffer,
   };
