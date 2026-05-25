@@ -7,6 +7,7 @@ import { REALTIME_AUDIO, REALTIME_SESSION_INSTRUCTIONS, WEBSOCKET_CONFIG } from 
 import { useNotifications } from '@/contexts/NotificationContext';
 import type { DebugCategory } from '@/types/notifications';
 import { getVadService, downsample24to16, upsample16to24 } from '@/lib/vad-service';
+import { isHallucination } from '@/lib/hallucination-filter';
 
 export interface TranscriptMessage {
   id: string;
@@ -45,55 +46,6 @@ function buildRealtimeUrl(baseUrl: string, model: string, language: string, inte
   const url = new URL('/v1/realtime', baseUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${url}?intent=${encodeURIComponent(intent)}&model=${encodeURIComponent(model)}&language=${encodeURIComponent(language)}`;
-}
-
-// ---------------------------------------------------------------------
-// Hallucination detection: filter Whisper's repetitive garbage output
-// Whisper on silence/noise produces patterns like "press again, press again, press again"
-// We detect when the same short phrase repeats 3+ times and suppress it.
-// ---------------------------------------------------------------------
-function isHallucination(text: string): boolean {
-  const normalized = text
-    .replace(/[.!?,\u2026;:\u2013\u2014]+$/g, '') // Strip trailing punctuation
-    .trim()
-    .toLowerCase();
-  if (!normalized) return false;
-
-  // Try splitting on common delimiters (commas, periods, exclamation, newlines)
-  const segments = normalized
-    .split(/[,.!?:;]+/)
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
-
-  // If we have 3+ segments, check if any phrase repeats 3+ times consecutively
-  if (segments.length >= 3) {
-    for (let i = 0; i <= segments.length - 3; i++) {
-      if (segments[i] === segments[i + 1] && segments[i] === segments[i + 2]) {
-        return true;
-      }
-    }
-  }
-
-  // Also check if the entire normalized text is a repetition of a short phrase
-  // e.g. "press again press again press again" (no delimiter between repeats)
-  if (normalized.length >= 6) {
-    const words = normalized.split(/\s+/);
-    for (let phraseLen = 2; phraseLen <= Math.floor(words.length / 3); phraseLen++) {
-      const phrase = words.slice(0, phraseLen).join(' ');
-      let count = 0;
-      for (let i = 0; i <= words.length - phraseLen; i += phraseLen) {
-        if (words.slice(i, i + phraseLen).join(' ') === phrase) {
-          count++;
-        }
-      }
-      // If the same phrase appears 3+ times and dominates the text
-      if (count >= 3 && (count * phraseLen) >= words.length * 0.75) {
-        return true;
-      }
-    }
-  }
-
-  return false;
 }
 
 export function useRealtimeTranscription(
