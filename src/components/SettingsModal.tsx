@@ -85,7 +85,6 @@ function ModelComboInput({
   isLoading: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isCustom, setIsCustom] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
@@ -101,22 +100,12 @@ function ModelComboInput({
     }
   }, [isOpen]);
 
-  // If value doesn't match any model and we have models, auto-switch to custom
+  // If value doesn't match any model and we have models, show it with a "current" badge
   const valueInList = !models.length || !value || models.some(m => m.id === value);
 
   const handleSelect = (modelId: string) => {
-    if (modelId === '__custom__') {
-      setIsCustom(true);
-      setIsOpen(false);
-      return;
-    }
     onChange(modelId);
-    setIsCustom(false);
     setIsOpen(false);
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onChange(e.target.value);
   };
 
   const handleToggleDropdown = () => {
@@ -132,12 +121,12 @@ function ModelComboInput({
         <input
           type="text"
           value={value}
-          onChange={handleInputChange}
-          className={`${inputClass} ${models.length > 0 && !isCustom ? 'rounded-r-none border-r-0' : ''}`}
+          onChange={(e) => onChange(e.target.value)}
+          className={`${inputClass} ${models.length > 0 ? 'rounded-r-none border-r-0' : ''}`}
           placeholder={placeholder}
           disabled={disabled}
         />
-        {models.length > 0 && !isCustom && (
+        {models.length > 0 && (
           <button
             type="button"
             onClick={handleToggleDropdown}
@@ -156,9 +145,6 @@ function ModelComboInput({
       {/* Dropdown list */}
       {isOpen && models.length > 0 && (
         <div className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-[#d7c7a7] bg-white shadow-lg dark:border-[#3b2f1d] dark:bg-[#1b1711]">
-          {isLoading && (
-            <div className="px-3 py-2 text-xs text-[#9c8a6f]">Loading models…</div>
-          )}
           {!isLoading && value && !valueInList && (
             <button
               type="button"
@@ -187,7 +173,7 @@ function ModelComboInput({
         </div>
       )}
 
-      {/* Error state */}
+      {/* Loading state */}
       {isLoading && models.length === 0 && (
         <div className="mt-1 text-xs text-[#9c8a6f]">Loading models…</div>
       )}
@@ -351,7 +337,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   // Section header with inline refresh icon
   const renderSectionHeader = (
     title: string,
-    subtitle: string | null,
     provider: 'ollama' | 'openai-compatible' | 'speaches',
     state: ProviderModelState,
     disabled: boolean,
@@ -364,10 +349,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
     return (
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
-          {title}
-          {subtitle && <span className="ml-1 text-xs text-[#9c8a6f]">({subtitle})</span>}
-        </h3>
+        <h3 className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">{title}</h3>
         <button
           type="button"
           onClick={() => fetchModels(provider)}
@@ -416,6 +398,182 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     );
   };
 
+  // Ollama section (shown only when active)
+  const renderOllamaSection = () => (
+    <div className="space-y-3">
+      {renderSectionHeader('Ollama', 'ollama', ollamaModelState, false)}
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Base URL</span>
+        <input
+          type="text"
+          value={settings.ollama_base_url}
+          onChange={(e) => handleChange('ollama_base_url', e.target.value)}
+          className={inputClass}
+          placeholder="http://localhost:11434"
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">
+          API Token <span className="text-[#9c8a6f]">(optional)</span>
+        </span>
+        <div className="relative mt-1">
+          <input
+            type={showOllamaToken ? 'text' : 'password'}
+            value={settings.ollama_api_token}
+            onChange={(e) => handleChange('ollama_api_token', e.target.value)}
+            className={`${inputClass} pr-10`}
+            placeholder="Leave empty for unauthenticated access"
+          />
+          {renderTokenToggle(showOllamaToken, () => setShowOllamaToken(!showOllamaToken))}
+        </div>
+      </label>
+
+      {renderModelError(ollamaModelState)}
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Conversation Model</span>
+        <ModelComboInput
+          value={settings.ollama_conversation_model}
+          onChange={(v) => handleChange('ollama_conversation_model', v)}
+          models={ollamaModelState.models}
+          placeholder="aya-expanse:latest"
+          disabled={false}
+          isLoading={ollamaModelState.isLoading}
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Translation Model</span>
+        <ModelComboInput
+          value={settings.ollama_translate_model}
+          onChange={(v) => handleChange('ollama_translate_model', v)}
+          models={ollamaModelState.models}
+          placeholder="aya-expanse:latest"
+          disabled={false}
+          isLoading={ollamaModelState.isLoading}
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Summarization Model</span>
+        <ModelComboInput
+          value={settings.ollama_summarize_model}
+          onChange={(v) => handleChange('ollama_summarize_model', v)}
+          models={ollamaModelState.models}
+          placeholder="phi4:latest"
+          disabled={false}
+          isLoading={ollamaModelState.isLoading}
+        />
+      </label>
+    </div>
+  );
+
+  // OpenAI-Compatible section (shown only when active)
+  const renderOpenAISection = () => (
+    <div className="space-y-3">
+      {renderSectionHeader('OpenAI Compatible', 'openai-compatible', openaiModelState, false)}
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Base URL</span>
+        <input
+          type="text"
+          value={settings.openai_compatible_base_url}
+          onChange={(e) => handleChange('openai_compatible_base_url', e.target.value)}
+          className={inputClass}
+          placeholder="http://localhost:8080"
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">
+          API Token <span className="text-[#9c8a6f]">(optional)</span>
+        </span>
+        <div className="relative mt-1">
+          <input
+            type={showOpenAIToken ? 'text' : 'password'}
+            value={settings.openai_compatible_api_token}
+            onChange={(e) => handleChange('openai_compatible_api_token', e.target.value)}
+            className={`${inputClass} pr-10`}
+            placeholder="Leave empty for unauthenticated access"
+          />
+          {renderTokenToggle(showOpenAIToken, () => setShowOpenAIToken(!showOpenAIToken))}
+        </div>
+      </label>
+
+      {renderModelError(openaiModelState)}
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Conversation Model</span>
+        <ModelComboInput
+          value={settings.openai_compatible_conversation_model}
+          onChange={(v) => handleChange('openai_compatible_conversation_model', v)}
+          models={openaiModelState.models}
+          placeholder="model-name"
+          disabled={false}
+          isLoading={openaiModelState.isLoading}
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Translation Model</span>
+        <ModelComboInput
+          value={settings.openai_compatible_translate_model}
+          onChange={(v) => handleChange('openai_compatible_translate_model', v)}
+          models={openaiModelState.models}
+          placeholder="model-name"
+          disabled={false}
+          isLoading={openaiModelState.isLoading}
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Summarization Model</span>
+        <ModelComboInput
+          value={settings.openai_compatible_summarize_model}
+          onChange={(v) => handleChange('openai_compatible_summarize_model', v)}
+          models={openaiModelState.models}
+          placeholder="model-name"
+          disabled={false}
+          isLoading={openaiModelState.isLoading}
+        />
+      </label>
+    </div>
+  );
+
+  // Speaches section (always shown — it's independent of LLM provider)
+  const renderSpeachesSection = () => (
+    <div className="space-y-3">
+      {renderSectionHeader('Speaches (Transcription)', 'speaches', speachesModelState, false)}
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Base URL</span>
+        <input
+          type="text"
+          value={settings.speaches_base_url}
+          onChange={(e) => handleChange('speaches_base_url', e.target.value)}
+          className={inputClass}
+          placeholder="http://localhost:10300"
+        />
+      </label>
+
+      {renderModelError(speachesModelState)}
+
+      <label className="block">
+        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Transcribe Model</span>
+        <ModelComboInput
+          value={settings.speaches_transcribe_model}
+          onChange={(v) => handleChange('speaches_transcribe_model', v)}
+          models={speachesModelState.models}
+          placeholder="Systran/faster-whisper-large-v3"
+          disabled={false}
+          isLoading={speachesModelState.isLoading}
+        />
+      </label>
+    </div>
+  );
+
   return (
     <div 
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
@@ -444,216 +602,27 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </button>
         </div>
 
-        <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+        <div className="space-y-5">
           {/* LLM Provider Selection */}
-          <div className="space-y-3">
-            <label className="block">
-              <span className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">LLM Provider</span>
-              <select
-                value={settings.llm_provider}
-                onChange={(e) => handleChange('llm_provider', e.target.value)}
-                className={inputClass}
-              >
-                {Object.entries(LLM_PROVIDERS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-            </label>
-          </div>
+          <label className="block">
+            <span className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">LLM Provider</span>
+            <select
+              value={settings.llm_provider}
+              onChange={(e) => handleChange('llm_provider', e.target.value)}
+              className={inputClass}
+            >
+              {Object.entries(LLM_PROVIDERS).map(([key, label]) => (
+                <option key={key} value={key}>{label}</option>
+              ))}
+            </select>
+          </label>
 
-          {/* Ollama Settings */}
-          <div className={`space-y-3 ${activeProvider !== 'ollama' ? 'opacity-50' : ''}`}>
-            {renderSectionHeader(
-              'Ollama Settings',
-              activeProvider !== 'ollama' ? 'inactive' : null,
-              'ollama',
-              ollamaModelState,
-              activeProvider !== 'ollama',
-            )}
-            
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Base URL</span>
-              <input
-                type="text"
-                value={settings.ollama_base_url}
-                onChange={(e) => handleChange('ollama_base_url', e.target.value)}
-                className={inputClass}
-                placeholder="http://localhost:11434"
-                disabled={activeProvider !== 'ollama'}
-              />
-            </label>
+          {/* Active LLM provider section — only show the selected one */}
+          {activeProvider === 'ollama' && renderOllamaSection()}
+          {activeProvider === 'openai-compatible' && renderOpenAISection()}
 
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">
-                API Token
-                <span className="ml-1 text-[#9c8a6f]">(optional)</span>
-              </span>
-              <div className="relative mt-1">
-                <input
-                  type={showOllamaToken ? 'text' : 'password'}
-                  value={settings.ollama_api_token}
-                  onChange={(e) => handleChange('ollama_api_token', e.target.value)}
-                  className={`${inputClass} pr-10`}
-                  placeholder="Leave empty for unauthenticated access"
-                  disabled={activeProvider !== 'ollama'}
-                />
-                {renderTokenToggle(showOllamaToken, () => setShowOllamaToken(!showOllamaToken))}
-              </div>
-            </label>
-
-            {renderModelError(ollamaModelState)}
-
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Conversation Model</span>
-              <ModelComboInput
-                value={settings.ollama_conversation_model}
-                onChange={(v) => handleChange('ollama_conversation_model', v)}
-                models={ollamaModelState.models}
-                placeholder="aya-expanse:latest"
-                disabled={activeProvider !== 'ollama'}
-                isLoading={ollamaModelState.isLoading}
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Translation Model</span>
-              <ModelComboInput
-                value={settings.ollama_translate_model}
-                onChange={(v) => handleChange('ollama_translate_model', v)}
-                models={ollamaModelState.models}
-                placeholder="aya-expanse:latest"
-                disabled={activeProvider !== 'ollama'}
-                isLoading={ollamaModelState.isLoading}
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Summarization Model</span>
-              <ModelComboInput
-                value={settings.ollama_summarize_model}
-                onChange={(v) => handleChange('ollama_summarize_model', v)}
-                models={ollamaModelState.models}
-                placeholder="phi4:latest"
-                disabled={activeProvider !== 'ollama'}
-                isLoading={ollamaModelState.isLoading}
-              />
-            </label>
-          </div>
-
-          {/* OpenAI-Compatible Settings */}
-          <div className={`space-y-3 ${activeProvider !== 'openai-compatible' ? 'opacity-50' : ''}`}>
-            {renderSectionHeader(
-              'OpenAI Compatible Settings',
-              activeProvider !== 'openai-compatible' ? 'inactive' : null,
-              'openai-compatible',
-              openaiModelState,
-              activeProvider !== 'openai-compatible',
-            )}
-
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Base URL</span>
-              <input
-                type="text"
-                value={settings.openai_compatible_base_url}
-                onChange={(e) => handleChange('openai_compatible_base_url', e.target.value)}
-                className={inputClass}
-                placeholder="http://localhost:8080"
-                disabled={activeProvider !== 'openai-compatible'}
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">
-                API Token
-                <span className="ml-1 text-[#9c8a6f]">(optional)</span>
-              </span>
-              <div className="relative mt-1">
-                <input
-                  type={showOpenAIToken ? 'text' : 'password'}
-                  value={settings.openai_compatible_api_token}
-                  onChange={(e) => handleChange('openai_compatible_api_token', e.target.value)}
-                  className={`${inputClass} pr-10`}
-                  placeholder="Leave empty for unauthenticated access"
-                  disabled={activeProvider !== 'openai-compatible'}
-                />
-                {renderTokenToggle(showOpenAIToken, () => setShowOpenAIToken(!showOpenAIToken))}
-              </div>
-            </label>
-
-            {renderModelError(openaiModelState)}
-
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Conversation Model</span>
-              <ModelComboInput
-                value={settings.openai_compatible_conversation_model}
-                onChange={(v) => handleChange('openai_compatible_conversation_model', v)}
-                models={openaiModelState.models}
-                placeholder="model-name"
-                disabled={activeProvider !== 'openai-compatible'}
-                isLoading={openaiModelState.isLoading}
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Translation Model</span>
-              <ModelComboInput
-                value={settings.openai_compatible_translate_model}
-                onChange={(v) => handleChange('openai_compatible_translate_model', v)}
-                models={openaiModelState.models}
-                placeholder="model-name"
-                disabled={activeProvider !== 'openai-compatible'}
-                isLoading={openaiModelState.isLoading}
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Summarization Model</span>
-              <ModelComboInput
-                value={settings.openai_compatible_summarize_model}
-                onChange={(v) => handleChange('openai_compatible_summarize_model', v)}
-                models={openaiModelState.models}
-                placeholder="model-name"
-                disabled={activeProvider !== 'openai-compatible'}
-                isLoading={openaiModelState.isLoading}
-              />
-            </label>
-          </div>
-
-          {/* Speaches Settings */}
-          <div className="space-y-3">
-            {renderSectionHeader(
-              'Speaches (Transcription) Settings',
-              null,
-              'speaches',
-              speachesModelState,
-              false,
-            )}
-            
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Base URL</span>
-              <input
-                type="text"
-                value={settings.speaches_base_url}
-                onChange={(e) => handleChange('speaches_base_url', e.target.value)}
-                className={inputClass}
-                placeholder="http://localhost:10300"
-              />
-            </label>
-
-            {renderModelError(speachesModelState)}
-
-            <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Transcribe Model</span>
-              <ModelComboInput
-                value={settings.speaches_transcribe_model}
-                onChange={(v) => handleChange('speaches_transcribe_model', v)}
-                models={speachesModelState.models}
-                placeholder="Systran/faster-whisper-large-v3"
-                disabled={false}
-                isLoading={speachesModelState.isLoading}
-              />
-            </label>
-          </div>
+          {/* Speaches — always shown */}
+          {renderSpeachesSection()}
         </div>
 
         {/* Save message */}
