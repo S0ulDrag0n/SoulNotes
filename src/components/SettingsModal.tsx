@@ -12,6 +12,12 @@ import {
 } from '@/lib/constants';
 import type { LLMProviderKey } from '@/lib/constants';
 
+interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+}
+
 interface Settings {
   llm_provider: LLMProviderKey;
   ollama_base_url: string;
@@ -55,6 +61,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showOllamaToken, setShowOllamaToken] = useState(false);
   const [showOpenAIToken, setShowOpenAIToken] = useState(false);
+  const [ollamaModels, setOllamaModels] = useState<ModelInfo[]>([]);
+  const [openaiModels, setOpenaiModels] = useState<ModelInfo[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
 
   // Load settings on mount
   useEffect(() => {
@@ -126,6 +136,44 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   const handleChange = (key: keyof Settings, value: string) => {
     setSettings(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleFetchOllamaModels = async () => {
+    if (!isDesktopMode()) return;
+    setIsLoadingModels(true);
+    setModelsError(null);
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const models = await invoke<ModelInfo[]>('fetch_ollama_models', {
+        baseUrl: settings.ollama_base_url,
+        apiToken: settings.ollama_api_token || null,
+      });
+      setOllamaModels(models);
+    } catch (error) {
+      setModelsError(error instanceof Error ? error.message : 'Failed to fetch Ollama models');
+      setOllamaModels([]);
+    } finally {
+      setIsLoadingModels(false);
+    }
+  };
+
+  const handleFetchOpenAIModels = async () => {
+    if (!isDesktopMode()) return;
+    setIsLoadingModels(true);
+    setModelsError(null);
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const models = await invoke<ModelInfo[]>('fetch_openai_compatible_models', {
+        baseUrl: settings.openai_compatible_base_url,
+        apiToken: settings.openai_compatible_api_token || null,
+      });
+      setOpenaiModels(models);
+    } catch (error) {
+      setModelsError(error instanceof Error ? error.message : 'Failed to fetch OpenAI-compatible models');
+      setOpenaiModels([]);
+    } finally {
+      setIsLoadingModels(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -232,40 +280,99 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </div>
             </label>
 
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                type="button"
+                onClick={handleFetchOllamaModels}
+                disabled={activeProvider !== 'ollama' || isLoadingModels}
+                className="rounded-lg bg-[#f3b34b] px-3 py-1.5 text-xs font-medium text-[#2a241b] hover:bg-[#e5a43c] disabled:opacity-50 disabled:cursor-not-allowed dark:bg-[#f3b34b] dark:hover:bg-[#e5a43c]"
+              >
+                {isLoadingModels && ollamaModels.length === 0 ? 'Loading...' : 'Fetch Models'}
+              </button>
+              {modelsError && activeProvider === 'ollama' && (
+                <span className="text-xs text-red-500">{modelsError}</span>
+              )}
+              {ollamaModels.length > 0 && activeProvider === 'ollama' && (
+                <span className="text-xs text-[#6b5a3f]">{ollamaModels.length} models found</span>
+              )}
+            </div>
+
             <label className="block">
               <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Conversation Model</span>
-              <input
-                type="text"
-                value={settings.ollama_conversation_model}
-                onChange={(e) => handleChange('ollama_conversation_model', e.target.value)}
-                className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
-                placeholder="aya-expanse:latest"
-                disabled={activeProvider !== 'ollama'}
-              />
+              {ollamaModels.length > 0 ? (
+                <select
+                  value={settings.ollama_conversation_model}
+                  onChange={(e) => handleChange('ollama_conversation_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  disabled={activeProvider !== 'ollama'}
+                >
+                  <option value="">-- Select model --</option>
+                  {ollamaModels.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={settings.ollama_conversation_model}
+                  onChange={(e) => handleChange('ollama_conversation_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  placeholder="aya-expanse:latest"
+                  disabled={activeProvider !== 'ollama'}
+                />
+              )}
             </label>
 
             <label className="block">
               <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Translation Model</span>
-              <input
-                type="text"
-                value={settings.ollama_translate_model}
-                onChange={(e) => handleChange('ollama_translate_model', e.target.value)}
-                className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
-                placeholder="aya-expanse:latest"
-                disabled={activeProvider !== 'ollama'}
-              />
+              {ollamaModels.length > 0 ? (
+                <select
+                  value={settings.ollama_translate_model}
+                  onChange={(e) => handleChange('ollama_translate_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  disabled={activeProvider !== 'ollama'}
+                >
+                  <option value="">-- Select model --</option>
+                  {ollamaModels.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={settings.ollama_translate_model}
+                  onChange={(e) => handleChange('ollama_translate_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  placeholder="aya-expanse:latest"
+                  disabled={activeProvider !== 'ollama'}
+                />
+              )}
             </label>
 
             <label className="block">
               <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Summarization Model</span>
-              <input
-                type="text"
-                value={settings.ollama_summarize_model}
-                onChange={(e) => handleChange('ollama_summarize_model', e.target.value)}
-                className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
-                placeholder="phi4:latest"
-                disabled={activeProvider !== 'ollama'}
-              />
+              {ollamaModels.length > 0 ? (
+                <select
+                  value={settings.ollama_summarize_model}
+                  onChange={(e) => handleChange('ollama_summarize_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  disabled={activeProvider !== 'ollama'}
+                >
+                  <option value="">-- Select model --</option>
+                  {ollamaModels.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={settings.ollama_summarize_model}
+                  onChange={(e) => handleChange('ollama_summarize_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  placeholder="phi4:latest"
+                  disabled={activeProvider !== 'ollama'}
+                />
+              )}
             </label>
           </div>
 
@@ -324,40 +431,99 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </div>
             </label>
 
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                type="button"
+                onClick={handleFetchOpenAIModels}
+                disabled={activeProvider !== 'openai-compatible' || isLoadingModels}
+                className="rounded-lg bg-[#f3b34b] px-3 py-1.5 text-xs font-medium text-[#2a241b] hover:bg-[#e5a43c] disabled:opacity-50 disabled:cursor-not-allowed dark:bg-[#f3b34b] dark:hover:bg-[#e5a43c]"
+              >
+                {isLoadingModels && openaiModels.length === 0 ? 'Loading...' : 'Fetch Models'}
+              </button>
+              {modelsError && activeProvider === 'openai-compatible' && (
+                <span className="text-xs text-red-500">{modelsError}</span>
+              )}
+              {openaiModels.length > 0 && activeProvider === 'openai-compatible' && (
+                <span className="text-xs text-[#6b5a3f]">{openaiModels.length} models found</span>
+              )}
+            </div>
+
             <label className="block">
               <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Conversation Model</span>
-              <input
-                type="text"
-                value={settings.openai_compatible_conversation_model}
-                onChange={(e) => handleChange('openai_compatible_conversation_model', e.target.value)}
-                className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
-                placeholder="model-name"
-                disabled={activeProvider !== 'openai-compatible'}
-              />
+              {openaiModels.length > 0 ? (
+                <select
+                  value={settings.openai_compatible_conversation_model}
+                  onChange={(e) => handleChange('openai_compatible_conversation_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  disabled={activeProvider !== 'openai-compatible'}
+                >
+                  <option value="">-- Select model --</option>
+                  {openaiModels.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={settings.openai_compatible_conversation_model}
+                  onChange={(e) => handleChange('openai_compatible_conversation_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  placeholder="model-name"
+                  disabled={activeProvider !== 'openai-compatible'}
+                />
+              )}
             </label>
 
             <label className="block">
               <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Translation Model</span>
-              <input
-                type="text"
-                value={settings.openai_compatible_translate_model}
-                onChange={(e) => handleChange('openai_compatible_translate_model', e.target.value)}
-                className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
-                placeholder="model-name"
-                disabled={activeProvider !== 'openai-compatible'}
-              />
+              {openaiModels.length > 0 ? (
+                <select
+                  value={settings.openai_compatible_translate_model}
+                  onChange={(e) => handleChange('openai_compatible_translate_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  disabled={activeProvider !== 'openai-compatible'}
+                >
+                  <option value="">-- Select model --</option>
+                  {openaiModels.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={settings.openai_compatible_translate_model}
+                  onChange={(e) => handleChange('openai_compatible_translate_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  placeholder="model-name"
+                  disabled={activeProvider !== 'openai-compatible'}
+                />
+              )}
             </label>
 
             <label className="block">
               <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Summarization Model</span>
-              <input
-                type="text"
-                value={settings.openai_compatible_summarize_model}
-                onChange={(e) => handleChange('openai_compatible_summarize_model', e.target.value)}
-                className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
-                placeholder="model-name"
-                disabled={activeProvider !== 'openai-compatible'}
-              />
+              {openaiModels.length > 0 ? (
+                <select
+                  value={settings.openai_compatible_summarize_model}
+                  onChange={(e) => handleChange('openai_compatible_summarize_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  disabled={activeProvider !== 'openai-compatible'}
+                >
+                  <option value="">-- Select model --</option>
+                  {openaiModels.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={settings.openai_compatible_summarize_model}
+                  onChange={(e) => handleChange('openai_compatible_summarize_model', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]"
+                  placeholder="model-name"
+                  disabled={activeProvider !== 'openai-compatible'}
+                />
+              )}
             </label>
           </div>
 
