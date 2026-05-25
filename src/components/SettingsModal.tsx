@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { isDesktopMode } from '@/utils/platform';
 import {
   DEFAULT_OLLAMA_CONFIG,
@@ -39,8 +39,6 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-const CUSTOM_MODEL_VALUE = '__custom__';
-
 const DEFAULT_SETTINGS: Settings = {
   llm_provider: 'ollama',
   ollama_base_url: DEFAULT_OLLAMA_CONFIG.baseUrl,
@@ -70,6 +68,133 @@ const initialModelState: ProviderModelState = {
   error: null,
 };
 
+/** Combo input: text field with inline dropdown for model selection */
+function ModelComboInput({
+  value,
+  onChange,
+  models,
+  placeholder,
+  disabled,
+  isLoading,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  models: ModelInfo[];
+  placeholder: string;
+  disabled: boolean;
+  isLoading: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isCustom, setIsCustom] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isOpen]);
+
+  // If value doesn't match any model and we have models, auto-switch to custom
+  const valueInList = !models.length || !value || models.some(m => m.id === value);
+
+  const handleSelect = (modelId: string) => {
+    if (modelId === '__custom__') {
+      setIsCustom(true);
+      setIsOpen(false);
+      return;
+    }
+    onChange(modelId);
+    setIsCustom(false);
+    setIsOpen(false);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onChange(e.target.value);
+  };
+
+  const handleToggleDropdown = () => {
+    if (disabled || !models.length) return;
+    setIsOpen(!isOpen);
+  };
+
+  const inputClass = "w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]";
+
+  return (
+    <div ref={wrapperRef} className="relative mt-1">
+      <div className="flex">
+        <input
+          type="text"
+          value={value}
+          onChange={handleInputChange}
+          className={`${inputClass} ${models.length > 0 && !isCustom ? 'rounded-r-none border-r-0' : ''}`}
+          placeholder={placeholder}
+          disabled={disabled}
+        />
+        {models.length > 0 && !isCustom && (
+          <button
+            type="button"
+            onClick={handleToggleDropdown}
+            className={`flex items-center justify-center rounded-r-lg border border-[#d7c7a7] bg-white px-2 text-[#6b5a3f] hover:bg-[#f0e6d6] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218] ${isOpen ? 'ring-2 ring-[#f3b34b]' : ''}`}
+            disabled={disabled}
+            aria-label="Select model from list"
+            aria-expanded={isOpen}
+          >
+            <svg className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      {/* Dropdown list */}
+      {isOpen && models.length > 0 && (
+        <div className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-[#d7c7a7] bg-white shadow-lg dark:border-[#3b2f1d] dark:bg-[#1b1711]">
+          {isLoading && (
+            <div className="px-3 py-2 text-xs text-[#9c8a6f]">Loading models…</div>
+          )}
+          {!isLoading && value && !valueInList && (
+            <button
+              type="button"
+              onClick={() => handleSelect(value)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[#f3b34b] hover:bg-[#f0e6d6] dark:hover:bg-[#2a2218]"
+            >
+              <span className="truncate">{value}</span>
+              <span className="shrink-0 rounded bg-[#f3b34b]/20 px-1 py-0.5 text-[10px] text-[#f3b34b]">current</span>
+            </button>
+          )}
+          {models.map(m => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => handleSelect(m.id)}
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[#f0e6d6] dark:hover:bg-[#2a2218] ${m.id === value ? 'bg-[#f3b34b]/10 text-[#2a241b] dark:text-[#f6f1e6]' : 'text-[#2a241b] dark:text-[#f6f1e6]'}`}
+            >
+              <span className="truncate">{m.name}</span>
+              {m.id === value && (
+                <svg className="h-3.5 w-3.5 shrink-0 text-[#f3b34b]" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Error state */}
+      {isLoading && models.length === 0 && (
+        <div className="mt-1 text-xs text-[#9c8a6f]">Loading models…</div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [isSaving, setIsSaving] = useState(false);
@@ -77,14 +202,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [showOllamaToken, setShowOllamaToken] = useState(false);
   const [showOpenAIToken, setShowOpenAIToken] = useState(false);
 
-  // Per-provider model state (fixes shared state bug)
+  // Per-provider model state
   const [ollamaModelState, setOllamaModelState] = useState<ProviderModelState>(initialModelState);
   const [openaiModelState, setOpenaiModelState] = useState<ProviderModelState>(initialModelState);
   const [speachesModelState, setSpeachesModelState] = useState<ProviderModelState>(initialModelState);
-
-  // Custom model input state — keyed by setting field, e.g. 'ollama_conversation_model'
-  const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
-  const [activeCustomFields, setActiveCustomFields] = useState<Set<string>>(new Set());
 
   // Load settings on mount
   useEffect(() => {
@@ -154,22 +275,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         speaches_base_url: config.speaches_base_url || DEFAULT_SETTINGS.speaches_base_url,
         speaches_transcribe_model: config.speaches_transcribe_model || DEFAULT_SETTINGS.speaches_transcribe_model,
       });
-
-      // Check if any model values aren't in the fetched models (will be set as custom after fetch)
-      // We track which fields have custom values not matching any fetched model
-      const customFields = new Set<string>();
-      const modelFields = [
-        'ollama_conversation_model', 'ollama_translate_model', 'ollama_summarize_model',
-        'openai_compatible_conversation_model', 'openai_compatible_translate_model', 'openai_compatible_summarize_model',
-        'speaches_transcribe_model',
-      ] as const;
-      for (const field of modelFields) {
-        const val = (config as Record<string, string | undefined>)[field];
-        if (val && val.trim()) {
-          customFields.add(field);
-        }
-      }
-      setActiveCustomFields(customFields);
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -236,170 +341,17 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   }, [settings.ollama_base_url, settings.ollama_api_token, settings.openai_compatible_base_url, settings.openai_compatible_api_token, settings.speaches_base_url]);
 
-  // Handle model dropdown change with custom input support
-  const handleModelSelect = (field: keyof Settings, value: string, provider: 'ollama' | 'openai-compatible' | 'speaches') => {
-    if (value === CUSTOM_MODEL_VALUE) {
-      // Switch to custom input mode for this field
-      setActiveCustomFields(prev => new Set(prev).add(field));
-      setCustomInputs(prev => ({ ...prev, [field]: settings[field] }));
-      return;
-    }
-    // Normal selection — also mark as not custom
-    handleChange(field, value);
-    setActiveCustomFields(prev => {
-      const next = new Set(prev);
-      next.delete(field);
-      return next;
-    });
-  };
-
-  const handleCustomInput = (field: keyof Settings, value: string) => {
-    setCustomInputs(prev => ({ ...prev, [field]: value }));
-    handleChange(field, value);
-  };
-
-  // Check if a model field value exists in the fetched model list
-  const isModelInList = (field: keyof Settings, models: ModelInfo[]): boolean => {
-    const val = settings[field];
-    if (!val) return true; // empty matches the "-- Select model --" placeholder
-    return models.some(m => m.id === val);
-  };
-
   if (!isOpen) return null;
 
   const activeProvider = settings.llm_provider;
 
-  // Build input class string (reuse everywhere)
+  // Shared input class
   const inputClass = "mt-1 w-full rounded-lg border border-[#d7c7a7] bg-white px-3 py-2 text-sm text-[#2a241b] focus:outline-none focus:ring-2 focus:ring-[#f3b34b] dark:border-[#3b2f1d] dark:bg-[#1b1711] dark:text-[#f6f1e6]";
-  const selectClass = inputClass;
 
-  // Reusable model field renderer with dropdown + custom input fallback
-  const renderModelField = (
-    label: string,
-    field: keyof Settings,
-    models: ModelInfo[],
-    provider: 'ollama' | 'openai-compatible' | 'speaches',
-    placeholder: string,
-    disabled: boolean,
-  ) => {
-    const hasModels = models.length > 0;
-    const isCustom = activeCustomFields.has(field);
-    const currentValueNotInList = hasModels && !isCustom && !isModelInList(field, models);
-
-    // If models are loaded, show dropdown (possibly with custom fallback)
-    if (hasModels) {
-      // If the current value isn't in the list and user hasn't explicitly gone custom, auto-switch to custom input
-      if (currentValueNotInList) {
-        return (
-          <label className="block">
-            <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">{label}</span>
-            <div className="flex gap-1 mt-1">
-              <input
-                type="text"
-                value={settings[field]}
-                onChange={(e) => handleChange(field, e.target.value)}
-                className={`${inputClass} flex-1`}
-                placeholder={placeholder}
-                disabled={disabled}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  // Pick the first model from the list as a quick way back to dropdown
-                  if (models.length > 0) {
-                    handleChange(field, models[0].id);
-                    setActiveCustomFields(prev => {
-                      const next = new Set(prev);
-                      next.delete(field);
-                      return next;
-                    });
-                  }
-                }}
-                className="rounded-lg border border-[#d7c7a7] px-2 py-1 text-xs text-[#6b5a3f] hover:bg-[#f0e6d6] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218] shrink-0"
-                title="Switch to dropdown"
-                disabled={disabled}
-              >
-                ▾
-              </button>
-            </div>
-          </label>
-        );
-      }
-
-      if (isCustom) {
-        return (
-          <label className="block">
-            <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">{label}</span>
-            <div className="flex gap-1 mt-1">
-              <input
-                type="text"
-                value={customInputs[field] ?? settings[field]}
-                onChange={(e) => handleCustomInput(field, e.target.value)}
-                className={`${inputClass} flex-1`}
-                placeholder={placeholder}
-                disabled={disabled}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveCustomFields(prev => {
-                    const next = new Set(prev);
-                    next.delete(field);
-                    return next;
-                  });
-                  // Reset to first model if current custom value is empty
-                  if (!settings[field] && models.length > 0) {
-                    handleChange(field, models[0].id);
-                  }
-                }}
-                className="rounded-lg border border-[#d7c7a7] px-2 py-1 text-xs text-[#6b5a3f] hover:bg-[#f0e6d6] dark:border-[#3b2f1d] dark:text-[#c8b7a0] dark:hover:bg-[#2a2218] shrink-0"
-                title="Switch to dropdown"
-                disabled={disabled}
-              >
-                ▾
-              </button>
-            </div>
-          </label>
-        );
-      }
-
-      return (
-        <label className="block">
-          <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">{label}</span>
-          <select
-            value={settings[field]}
-            onChange={(e) => handleModelSelect(field, e.target.value, provider)}
-            className={selectClass}
-            disabled={disabled}
-          >
-            <option value="">-- Select model --</option>
-            {models.map(m => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-            <option value={CUSTOM_MODEL_VALUE}>✏️ Custom…</option>
-          </select>
-        </label>
-      );
-    }
-
-    // No models loaded — plain text input
-    return (
-      <label className="block">
-        <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">{label}</span>
-        <input
-          type="text"
-          value={settings[field]}
-          onChange={(e) => handleChange(field, e.target.value)}
-          className={inputClass}
-          placeholder={placeholder}
-          disabled={disabled}
-        />
-      </label>
-    );
-  };
-
-  // Reusable fetch button + status for a provider section
-  const renderFetchButton = (
+  // Section header with inline refresh icon
+  const renderSectionHeader = (
+    title: string,
+    subtitle: string | null,
     provider: 'ollama' | 'openai-compatible' | 'speaches',
     state: ProviderModelState,
     disabled: boolean,
@@ -411,21 +363,26 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }[provider];
 
     return (
-      <div className="flex items-center gap-2 mt-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
+          {title}
+          {subtitle && <span className="ml-1 text-xs text-[#9c8a6f]">({subtitle})</span>}
+        </h3>
         <button
           type="button"
           onClick={() => fetchModels(provider)}
           disabled={disabled || state.isLoading}
-          className="rounded-lg bg-[#f3b34b] px-3 py-1.5 text-xs font-medium text-[#2a241b] hover:bg-[#e5a43c] disabled:opacity-50 disabled:cursor-not-allowed dark:bg-[#f3b34b] dark:hover:bg-[#e5a43c]"
+          className="flex items-center gap-1 rounded-md p-1 text-[#6b5a3f] hover:bg-[#f0e6d6] hover:text-[#5c4d39] disabled:opacity-40 disabled:cursor-not-allowed dark:text-[#c8b7a0] dark:hover:bg-[#2a2218]"
+          title={`Refresh ${label} models`}
+          aria-label={`Refresh ${label} models`}
         >
-          {state.isLoading ? 'Loading…' : `Refresh Models`}
+          <svg className={`h-3.5 w-3.5 ${state.isLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          {state.models.length > 0 && (
+            <span className="text-[10px]">{state.models.length}</span>
+          )}
         </button>
-        {state.error && (
-          <span className="text-xs text-red-500 truncate" title={state.error}>{state.error}</span>
-        )}
-        {state.models.length > 0 && (
-          <span className="text-xs text-[#6b5a3f]">{state.models.length} model{state.models.length !== 1 ? 's' : ''}</span>
-        )}
       </div>
     );
   };
@@ -450,6 +407,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       </svg>
     </button>
   );
+
+  // Error inline for a provider section
+  const renderModelError = (state: ProviderModelState) => {
+    if (!state.error) return null;
+    return (
+      <p className="text-xs text-red-500 mt-1">{state.error}</p>
+    );
+  };
 
   return (
     <div 
@@ -482,15 +447,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         <div className="space-y-4 max-h-[60vh] overflow-y-auto">
           {/* LLM Provider Selection */}
           <div className="space-y-3">
-            <h3 className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
-              LLM Provider
-            </h3>
             <label className="block">
-              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Active Provider</span>
+              <span className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">LLM Provider</span>
               <select
                 value={settings.llm_provider}
                 onChange={(e) => handleChange('llm_provider', e.target.value)}
-                className={selectClass}
+                className={inputClass}
               >
                 {Object.entries(LLM_PROVIDERS).map(([key, label]) => (
                   <option key={key} value={key}>{label}</option>
@@ -501,9 +463,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
           {/* Ollama Settings */}
           <div className={`space-y-3 ${activeProvider !== 'ollama' ? 'opacity-50' : ''}`}>
-            <h3 className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
-              Ollama Settings {activeProvider !== 'ollama' && <span className="text-xs text-[#9c8a6f]">(inactive)</span>}
-            </h3>
+            {renderSectionHeader(
+              'Ollama Settings',
+              activeProvider !== 'ollama' ? 'inactive' : null,
+              'ollama',
+              ollamaModelState,
+              activeProvider !== 'ollama',
+            )}
             
             <label className="block">
               <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Base URL</span>
@@ -535,21 +501,54 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </div>
             </label>
 
-            {renderFetchButton('ollama', ollamaModelState, activeProvider !== 'ollama')}
+            {renderModelError(ollamaModelState)}
 
-            {renderModelField('Conversation Model', 'ollama_conversation_model', ollamaModelState.models, 'ollama', 'aya-expanse:latest', activeProvider !== 'ollama')}
-            {renderModelField('Translation Model', 'ollama_translate_model', ollamaModelState.models, 'ollama', 'aya-expanse:latest', activeProvider !== 'ollama')}
-            {renderModelField('Summarization Model', 'ollama_summarize_model', ollamaModelState.models, 'ollama', 'phi4:latest', activeProvider !== 'ollama')}
+            <label className="block">
+              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Conversation Model</span>
+              <ModelComboInput
+                value={settings.ollama_conversation_model}
+                onChange={(v) => handleChange('ollama_conversation_model', v)}
+                models={ollamaModelState.models}
+                placeholder="aya-expanse:latest"
+                disabled={activeProvider !== 'ollama'}
+                isLoading={ollamaModelState.isLoading}
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Translation Model</span>
+              <ModelComboInput
+                value={settings.ollama_translate_model}
+                onChange={(v) => handleChange('ollama_translate_model', v)}
+                models={ollamaModelState.models}
+                placeholder="aya-expanse:latest"
+                disabled={activeProvider !== 'ollama'}
+                isLoading={ollamaModelState.isLoading}
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Summarization Model</span>
+              <ModelComboInput
+                value={settings.ollama_summarize_model}
+                onChange={(v) => handleChange('ollama_summarize_model', v)}
+                models={ollamaModelState.models}
+                placeholder="phi4:latest"
+                disabled={activeProvider !== 'ollama'}
+                isLoading={ollamaModelState.isLoading}
+              />
+            </label>
           </div>
 
           {/* OpenAI-Compatible Settings */}
           <div className={`space-y-3 ${activeProvider !== 'openai-compatible' ? 'opacity-50' : ''}`}>
-            <h3 className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
-              OpenAI Compatible Settings {activeProvider !== 'openai-compatible' && <span className="text-xs text-[#9c8a6f]">(inactive)</span>}
-            </h3>
-            <p className="text-xs text-[#9c8a6f]">
-              Compatible with llama.cpp, LM Studio, vLLM, text-generation-webui, and any server implementing the OpenAI chat completions API.
-            </p>
+            {renderSectionHeader(
+              'OpenAI Compatible Settings',
+              activeProvider !== 'openai-compatible' ? 'inactive' : null,
+              'openai-compatible',
+              openaiModelState,
+              activeProvider !== 'openai-compatible',
+            )}
 
             <label className="block">
               <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Base URL</span>
@@ -581,18 +580,54 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </div>
             </label>
 
-            {renderFetchButton('openai-compatible', openaiModelState, activeProvider !== 'openai-compatible')}
+            {renderModelError(openaiModelState)}
 
-            {renderModelField('Conversation Model', 'openai_compatible_conversation_model', openaiModelState.models, 'openai-compatible', 'model-name', activeProvider !== 'openai-compatible')}
-            {renderModelField('Translation Model', 'openai_compatible_translate_model', openaiModelState.models, 'openai-compatible', 'model-name', activeProvider !== 'openai-compatible')}
-            {renderModelField('Summarization Model', 'openai_compatible_summarize_model', openaiModelState.models, 'openai-compatible', 'model-name', activeProvider !== 'openai-compatible')}
+            <label className="block">
+              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Conversation Model</span>
+              <ModelComboInput
+                value={settings.openai_compatible_conversation_model}
+                onChange={(v) => handleChange('openai_compatible_conversation_model', v)}
+                models={openaiModelState.models}
+                placeholder="model-name"
+                disabled={activeProvider !== 'openai-compatible'}
+                isLoading={openaiModelState.isLoading}
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Translation Model</span>
+              <ModelComboInput
+                value={settings.openai_compatible_translate_model}
+                onChange={(v) => handleChange('openai_compatible_translate_model', v)}
+                models={openaiModelState.models}
+                placeholder="model-name"
+                disabled={activeProvider !== 'openai-compatible'}
+                isLoading={openaiModelState.isLoading}
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Summarization Model</span>
+              <ModelComboInput
+                value={settings.openai_compatible_summarize_model}
+                onChange={(v) => handleChange('openai_compatible_summarize_model', v)}
+                models={openaiModelState.models}
+                placeholder="model-name"
+                disabled={activeProvider !== 'openai-compatible'}
+                isLoading={openaiModelState.isLoading}
+              />
+            </label>
           </div>
 
           {/* Speaches Settings */}
           <div className="space-y-3">
-            <h3 className="text-sm font-medium text-[#5c4d39] dark:text-[#d6c5ad]">
-              Speaches (Transcription) Settings
-            </h3>
+            {renderSectionHeader(
+              'Speaches (Transcription) Settings',
+              null,
+              'speaches',
+              speachesModelState,
+              false,
+            )}
             
             <label className="block">
               <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Base URL</span>
@@ -605,9 +640,19 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               />
             </label>
 
-            {renderFetchButton('speaches', speachesModelState, false)}
+            {renderModelError(speachesModelState)}
 
-            {renderModelField('Transcribe Model', 'speaches_transcribe_model', speachesModelState.models, 'speaches', 'Systran/faster-whisper-large-v3', false)}
+            <label className="block">
+              <span className="text-xs text-[#6b5a3f] dark:text-[#c8b7a0]">Transcribe Model</span>
+              <ModelComboInput
+                value={settings.speaches_transcribe_model}
+                onChange={(v) => handleChange('speaches_transcribe_model', v)}
+                models={speachesModelState.models}
+                placeholder="Systran/faster-whisper-large-v3"
+                disabled={false}
+                isLoading={speachesModelState.isLoading}
+              />
+            </label>
           </div>
         </div>
 
