@@ -14,6 +14,7 @@ Real-time speech transcription, translation, and summarization application.
 - **Multi-language Support** - Support for English, Spanish, French, German, Italian, Portuguese, Japanese, Korean, Chinese, and Arabic
 - **Dark Mode** - Toggle between light and dark themes
 - **Desktop App** - Standalone Windows executable (Tauri)
+- **Multiple LLM Providers** - Use Ollama or any OpenAI-compatible server (llama.cpp, LM Studio, vLLM, text-generation-webui)
 
 ## Quick Start (Web)
 
@@ -65,22 +66,76 @@ The build process:
 
 > **Note:** First build may take 5-10 minutes as Rust compiles all dependencies. Subsequent builds are much faster.
 
+## LLM Providers
+
+SoulNotes supports two LLM providers:
+
+### Ollama (Default)
+
+The default provider. Use it with a local or remote Ollama server.
+
+### OpenAI-Compatible
+
+Use any server that implements the OpenAI `/v1/chat/completions` API, including:
+
+- **llama.cpp** — Local inference server
+- **LM Studio** — GUI for running local models
+- **vLLM** — High-throughput serving
+- **text-generation-webui** — Popular local LLM UI
+- **Any OpenAI-compatible endpoint** — Including OpenAI itself, Azure OpenAI, etc.
+
+Set `LLM_PROVIDER=openai-compatible` in your environment or config, and configure the base URL and optional API token.
+
+> **Note:** When using OpenAI-compatible provider, you must specify model names for each function (translate, summarize, conversation). These default to empty strings and will throw an error if not set.
+
+### Switching Providers
+
+**Desktop (Tauri):** Use the Settings UI to select your provider and configure base URL, API token, and model names.
+
+**Web/Docker:** Set `LLM_PROVIDER` in your `.env.local` or `config.yml`:
+
+```bash
+# Use Ollama (default)
+LLM_PROVIDER=ollama
+
+# Use an OpenAI-compatible server
+LLM_PROVIDER=openai-compatible
+OPENAI_COMPATIBLE_BASE_URL=http://127.0.0.1:8080
+OPENAI_COMPATIBLE_TRANSLATE_MODEL=my-translate-model
+OPENAI_COMPATIBLE_SUMMARIZE_MODEL=my-summarize-model
+OPENAI_COMPATIBLE_CONVERSATION_MODEL=my-chat-model
+```
+
 ## Docker
 
 ```bash
 # Build the image
 docker build -t soulnotes:latest .
 
-# Run the container
+# Run with Ollama (default)
 docker run --rm -p 3000:3000 \
   -e SPEACHES_BASE_URL=http://127.0.0.1:10300 \
   -e SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
   -e SPEACHES_TRANSCRIBE_LANGUAGE=zh \
   -e OLLAMA_BASE_URL=http://127.0.0.1:10102 \
-  -e OLLAMA_API_TOKEN=your_token_here \
   -e OLLAMA_TRANSLATE_MODEL=aya-expanse:latest \
   -e OLLAMA_SUMMARIZE_MODEL=phi4:latest \
   -e OLLAMA_CONVERSATION_MODEL=aya-expanse:latest \
+  -e NEXT_PUBLIC_SPEACHES_BASE_URL=http://127.0.0.1:10300 \
+  -e NEXT_PUBLIC_SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
+  -e NEXT_PUBLIC_SPEACHES_TTS_MODEL=kokoro-tts \
+  soulnotes:latest
+
+# Run with OpenAI-compatible provider
+docker run --rm -p 3000:3000 \
+  -e LLM_PROVIDER=openai-compatible \
+  -e OPENAI_COMPATIBLE_BASE_URL=http://127.0.0.1:8080 \
+  -e OPENAI_COMPATIBLE_TRANSLATE_MODEL=my-translate-model \
+  -e OPENAI_COMPATIBLE_SUMMARIZE_MODEL=my-summarize-model \
+  -e OPENAI_COMPATIBLE_CONVERSATION_MODEL=my-chat-model \
+  -e SPEACHES_BASE_URL=http://127.0.0.1:10300 \
+  -e SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
+  -e SPEACHES_TRANSCRIBE_LANGUAGE=zh \
   -e NEXT_PUBLIC_SPEACHES_BASE_URL=http://127.0.0.1:10300 \
   -e NEXT_PUBLIC_SPEACHES_TRANSCRIBE_MODEL=Systran/faster-whisper-large-v3 \
   -e NEXT_PUBLIC_SPEACHES_TTS_MODEL=kokoro-tts \
@@ -91,15 +146,36 @@ docker run --rm -p 3000:3000 \
 
 Create a `.env.local` file with the following variables:
 
-### Server-side Variables
+### Provider Selection
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LLM_PROVIDER` | LLM provider: `ollama` or `openai-compatible` | `ollama` |
+
+### Ollama Configuration
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `OLLAMA_BASE_URL` | Ollama API endpoint | `http://127.0.0.1:10102` |
-| `OLLAMA_API_TOKEN` | Ollama API token | (none) |
+| `OLLAMA_API_TOKEN` | Ollama API token (optional) | (none) |
 | `OLLAMA_TRANSLATE_MODEL` | Translation model | `aya-expanse:latest` |
 | `OLLAMA_SUMMARIZE_MODEL` | Summarization model | `phi4:latest` |
 | `OLLAMA_CONVERSATION_MODEL` | AI conversation partner model | `aya-expanse:latest` |
+
+### OpenAI-Compatible Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_COMPATIBLE_BASE_URL` | OpenAI-compatible API endpoint | `http://127.0.0.1:8080` |
+| `OPENAI_COMPATIBLE_API_TOKEN` | API token (optional) | (none) |
+| `OPENAI_COMPATIBLE_TRANSLATE_MODEL` | Translation model | (must set) |
+| `OPENAI_COMPATIBLE_SUMMARIZE_MODEL` | Summarization model | (must set) |
+| `OPENAI_COMPATIBLE_CONVERSATION_MODEL` | Conversation model | (must set) |
+
+### Speech/Transcription Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
 | `SPEACHES_BASE_URL` | Speeches API endpoint (server) | `http://127.0.0.1:10300` |
 | `SPEACHES_TRANSCRIBE_MODEL` | Transcription model | `Systran/faster-whisper-large-v3` |
 | `SPEACHES_TRANSCRIBE_LANGUAGE` | Source language code | `zh` |
