@@ -63,8 +63,10 @@ export const defaultTauriResponses = {
   get_audio_devices: [['device-1', 'Microphone 1'], ['device-2', 'Microphone 2']] as [string, string][],
   get_system_audio_devices: [['speaker-1', 'Speakers']] as [string, string][],
   get_config: {
+    llm_provider: 'ollama',
     speaches_base_url: 'http://localhost:10300',
     ollama_base_url: 'http://localhost:10102',
+    openai_compatible_base_url: 'http://localhost:8080',
   },
   translate_text: 'Translated text result',
   summarize_text: 'Summary result',

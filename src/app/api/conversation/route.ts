@@ -1,9 +1,6 @@
 // src/app/api/conversation/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
-import { Ollama } from 'ollama';
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
 import {
   SCENARIO_CONFIGS,
   DIFFICULTY_CONFIGS,
@@ -12,7 +9,9 @@ import {
   type Correction,
   type LearningProfile,
 } from '@/types/conversation';
-import { DEFAULT_OLLAMA_CONFIG, OLLAMA_OPTIONS, LANGUAGE_LABELS, CONFIG_PATHS } from '@/lib/constants';
+import { LANGUAGE_LABELS } from '@/lib/constants';
+import { LLMClient, buildLLMConfig } from '@/lib/llm-client';
+import { loadConfig } from '@/lib/load-config';
 
 interface ConversationRequest {
   messages: Array<{
@@ -25,98 +24,26 @@ interface ConversationRequest {
   learningProfile?: LearningProfile;
 }
 
-type AppConfig = {
-  ollama_base_url?: string;
-  ollama_api_token?: string;
-  ollama_conversation_model?: string;
-};
-
-function loadConfig(): AppConfig {
-  const configPaths = [
-    join(process.cwd(), CONFIG_PATHS.primary),
-    join(process.cwd(), CONFIG_PATHS.secondary),
-    CONFIG_PATHS.docker,
-  ];
-
-  for (const configPath of configPaths) {
-    if (existsSync(configPath)) {
-      try {
-        const content = readFileSync(configPath, 'utf-8');
-        const config: AppConfig = {};
-        const lines = content.split('\n');
-        
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) continue;
-          
-          const colonIndex = trimmed.indexOf(':');
-          if (colonIndex === -1) continue;
-          
-          const key = trimmed.slice(0, colonIndex).trim();
-          let value = trimmed.slice(colonIndex + 1).trim();
-          
-          if ((value.startsWith('"') && value.endsWith('"')) ||
-              (value.startsWith("'") && value.endsWith("'"))) {
-            value = value.slice(1, -1);
-          }
-          
-          if (value === 'null' || value === '~') continue;
-          
-          if (key === 'ollama_base_url') config.ollama_base_url = value;
-          if (key === 'ollama_api_token') config.ollama_api_token = value;
-          if (key === 'ollama_conversation_model') config.ollama_conversation_model = value;
-        }
-        
-        return config;
-      } catch (error) {
-        console.error(`Error loading config from ${configPath}:`, error);
-      }
-    }
-  }
-  
-  return {};
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body: ConversationRequest = await request.json();
     const { messages, language, scenario, difficulty, learningProfile } = body;
 
-    // Load config
-    const config = loadConfig();
+    // Load config and build LLM client
+    const rawConfig = loadConfig();
+    const llmConfig = buildLLMConfig(rawConfig);
+    const llm = new LLMClient(llmConfig);
 
     // Build system prompt
     const systemPrompt = buildSystemPrompt(language, scenario, difficulty, learningProfile);
 
-    // Set up Ollama client with optional auth
-    const ollamaHeaders: Record<string, string> = {};
-    const apiToken = process.env.OLLAMA_API_TOKEN ?? config.ollama_api_token;
-    if (apiToken) {
-      ollamaHeaders['Authorization'] = `Bearer ${apiToken}`;
-    }
+    // Call LLM
+    const response = await llm.converse([
+      { role: 'system', content: systemPrompt },
+      ...messages,
+    ]);
 
-    const ollama = new Ollama({
-      host: process.env.OLLAMA_BASE_URL ?? config.ollama_base_url ?? DEFAULT_OLLAMA_CONFIG.baseUrl,
-      headers: ollamaHeaders,
-    });
-
-    // Call Ollama API
-    const response = await ollama.chat({
-      model: process.env.OLLAMA_CONVERSATION_MODEL ?? config.ollama_conversation_model ?? DEFAULT_OLLAMA_CONFIG.conversationModel,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages,
-      ],
-      stream: false,
-      think: false,
-      options: {
-        temperature: 0.7, // Higher temperature for more creative conversation
-        top_p: OLLAMA_OPTIONS.topP,
-        num_predict: OLLAMA_OPTIONS.numPredict,
-      },
-    });
-
-    const assistantMessage = response.message?.content || '';
+    const assistantMessage = response.content;
 
     // Extract corrections and vocabulary from the response
     const { cleanedContent, corrections, vocabulary } = extractMetadata(assistantMessage);
@@ -205,7 +132,7 @@ function extractMetadata(content: string): {
   let match;
   while ((match = correctionRegex.exec(content)) !== null) {
     corrections.push({
-      type: 'grammar', // Default to grammar, could be enhanced
+      type: 'grammar',
       original: match[1].trim(),
       corrected: match[2].trim(),
       explanation: match[3].trim(),
@@ -219,7 +146,7 @@ function extractMetadata(content: string): {
     vocabulary.push({
       word: match[1].trim(),
       translation: match[2].trim(),
-      context: '', // Could extract surrounding context
+      context: '',
     });
   }
 

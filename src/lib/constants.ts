@@ -87,6 +87,22 @@ export const DEFAULT_OLLAMA_CONFIG = {
   conversationModel: 'qwen3.5:latest',
 } as const;
 
+/** Default configuration for OpenAI-compatible service (llama.cpp, LM Studio, vLLM, etc.) */
+export const DEFAULT_OPENAI_COMPATIBLE_CONFIG = {
+  baseUrl: 'http://127.0.0.1:8080',
+  translateModel: '',
+  summarizeModel: '',
+  conversationModel: '',
+} as const;
+
+/** Available LLM providers */
+export const LLM_PROVIDERS = {
+  ollama: 'Ollama',
+  'openai-compatible': 'OpenAI Compatible (llama.cpp, LM Studio, vLLM)',
+} as const;
+
+export type LLMProviderKey = keyof typeof LLM_PROVIDERS;
+
 /** Ollama API options */
 export const OLLAMA_OPTIONS = {
   temperature: 0.3,

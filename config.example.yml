@@ -4,12 +4,19 @@
 # For Tauri: place config.yml next to the executable
 # Default: localhost (override in config.local.yml for production server)
 
+# LLM Provider Selection
+# Determines which backend is used for translation, summarization, and conversation
+# Options: "ollama" (default) or "openai-compatible"
+# "openai-compatible" supports llama.cpp, LM Studio, vLLM, text-generation-webui, etc.
+llm_provider: "ollama"
+
 # Speaches (Real-time Transcription) Settings
 speaches_base_url: "http://127.0.0.1:10300"
 speaches_transcribe_model: "Systran/faster-whisper-large-v3"
 speaches_transcribe_language: "zh"
 
 # Ollama (Translation & Summarization) Settings
+# Used when llm_provider is "ollama"
 ollama_base_url: "http://127.0.0.1:10102"
 # API token for authenticated Ollama instances (optional)
 # In desktop mode, this is stored securely in OS credential storage (Keychain/Credential Manager)
@@ -18,6 +25,19 @@ ollama_api_token: null
 ollama_translate_model: "aya-expanse:latest"
 ollama_summarize_model: "phi4:latest"
 ollama_conversation_model: "aya-expanse:latest"  # Model for AI conversation partner
+
+# OpenAI-Compatible (Translation & Summarization) Settings
+# Used when llm_provider is "openai-compatible"
+# Compatible with llama.cpp, LM Studio, vLLM, text-generation-webui, and any
+# server implementing the OpenAI /v1/chat/completions API
+openai_compatible_base_url: "http://127.0.0.1:8080"
+# API token for authenticated endpoints (optional)
+# In desktop mode, this is stored securely in OS credential storage
+# In web/Docker mode, use the OPENAI_COMPATIBLE_API_TOKEN environment variable instead
+openai_compatible_api_token: null
+openai_compatible_translate_model: null      # Set to model name served by your endpoint
+openai_compatible_summarize_model: null      # Set to model name served by your endpoint
+openai_compatible_conversation_model: null   # Set to model name served by your endpoint
 
 # Audio Device Settings (Tauri only - persists selected devices)
 # These are saved automatically when you select devices in the UI

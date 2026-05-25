@@ -1,16 +1,8 @@
 // src/app/api/meeting-report/route.ts
 
-import { Ollama } from 'ollama';
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
-import { DEFAULT_OLLAMA_CONFIG, CONFIG_PATHS } from '@/lib/constants';
+import { LLMClient, buildLLMConfig } from '@/lib/llm-client';
+import { loadConfig } from '@/lib/load-config';
 import { NextResponse } from 'next/server';
-
-type AppConfig = {
-  ollama_base_url?: string;
-  ollama_api_token?: string;
-  ollama_summarize_model?: string;
-};
 
 interface MeetingReportRequest {
   transcript: string;
@@ -37,52 +29,6 @@ interface TechnicalTerm {
   term: string;
   definition: string;
   field: string;
-}
-
-function loadConfig(): AppConfig {
-  const configPaths = [
-    join(process.cwd(), CONFIG_PATHS.primary),
-    join(process.cwd(), CONFIG_PATHS.secondary),
-    CONFIG_PATHS.docker,
-  ];
-
-  for (const configPath of configPaths) {
-    if (existsSync(configPath)) {
-      try {
-        const content = readFileSync(configPath, 'utf-8');
-        const config: AppConfig = {};
-        const lines = content.split('\n');
-        
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) continue;
-          
-          const colonIndex = trimmed.indexOf(':');
-          if (colonIndex === -1) continue;
-          
-          const key = trimmed.slice(0, colonIndex).trim();
-          let value = trimmed.slice(colonIndex + 1).trim();
-          
-          if ((value.startsWith('"') && value.endsWith('"')) ||
-              (value.startsWith("'") && value.endsWith("'"))) {
-            value = value.slice(1, -1);
-          }
-          
-          if (value === 'null' || value === '~') continue;
-          
-          if (key === 'ollama_base_url') config.ollama_base_url = value;
-          if (key === 'ollama_api_token') config.ollama_api_token = value;
-          if (key === 'ollama_summarize_model') config.ollama_summarize_model = value;
-        }
-        
-        return config;
-      } catch (error) {
-        console.error(`Error loading config from ${configPath}:`, error);
-      }
-    }
-  }
-  
-  return {};
 }
 
 function calculateWordFrequency(text: string): Record<string, number> {
@@ -116,21 +62,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // Load config
-    const config = loadConfig();
-
-    const ollamaHeaders: Record<string, string> = {};
-    const apiToken = process.env.OLLAMA_API_TOKEN ?? config.ollama_api_token;
-    if (apiToken) {
-      ollamaHeaders['Authorization'] = `Bearer ${apiToken}`;
-    }
-
-    const ollama = new Ollama({
-      host: process.env.OLLAMA_BASE_URL ?? config.ollama_base_url ?? DEFAULT_OLLAMA_CONFIG.baseUrl,
-      headers: ollamaHeaders,
-    });
-
-    const model = process.env.OLLAMA_SUMMARIZE_MODEL ?? config.ollama_summarize_model ?? DEFAULT_OLLAMA_CONFIG.summarizeModel;
+    // Load config and build LLM client
+    const rawConfig = loadConfig();
+    const llmConfig = buildLLMConfig(rawConfig);
+    const llm = new LLMClient(llmConfig);
 
     // Extract vocabulary from the meeting
     const vocabularyPrompt = `Analyze the following ${sourceLanguage} text and extract vocabulary words that would be useful for a language learner.
@@ -158,13 +93,11 @@ Respond in JSON format:
   ]
 }`;
 
-    const vocabResponse = await ollama.chat({
-      model,
-      messages: [{ role: 'user', content: vocabularyPrompt }],
-      format: 'json',
-    });
+    const vocabResponse = await llm.chat(llmConfig.summarizeModel, [
+      { role: 'user', content: vocabularyPrompt },
+    ]);
 
-    const vocabData = JSON.parse(vocabResponse.message?.content ?? '{"vocabulary": []}');
+    const vocabData = JSON.parse(vocabResponse.content ?? '{"vocabulary": []}');
     const vocabulary: ExtractedVocabulary[] = vocabData.vocabulary || [];
 
     // Extract key phrases
@@ -189,13 +122,11 @@ Respond in JSON format:
   ]
 }`;
 
-    const phrasesResponse = await ollama.chat({
-      model,
-      messages: [{ role: 'user', content: phrasesPrompt }],
-      format: 'json',
-    });
+    const phrasesResponse = await llm.chat(llmConfig.summarizeModel, [
+      { role: 'user', content: phrasesPrompt },
+    ]);
 
-    const phrasesData = JSON.parse(phrasesResponse.message?.content ?? '{"phrases": []}');
+    const phrasesData = JSON.parse(phrasesResponse.content ?? '{"phrases": []}');
     const phrases: KeyPhrase[] = phrasesData.phrases || [];
 
     // Extract technical terms
@@ -220,13 +151,11 @@ Respond in JSON format:
   ]
 }`;
 
-    const termsResponse = await ollama.chat({
-      model,
-      messages: [{ role: 'user', content: termsPrompt }],
-      format: 'json',
-    });
+    const termsResponse = await llm.chat(llmConfig.summarizeModel, [
+      { role: 'user', content: termsPrompt },
+    ]);
 
-    const termsData = JSON.parse(termsResponse.message?.content ?? '{"terms": []}');
+    const termsData = JSON.parse(termsResponse.content ?? '{"terms": []}');
     const terms: TechnicalTerm[] = termsData.terms || [];
 
     // Calculate word frequency
