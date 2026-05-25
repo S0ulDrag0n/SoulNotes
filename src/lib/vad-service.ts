@@ -377,10 +377,36 @@ export class VadService {
   }
 
   /**
-   * Reset VAD state and Silero model hidden state
-   * Call when speech ends or when restarting capture
+   * Reset debounce state after speech ends.
+   *
+   * IMPORTANT: This does NOT reset the Silero model hidden state.
+   * The recurrent model needs its hidden state to maintain context across
+   * speech segments — resetting it causes the model to go "cold", leading
+   * to false negatives (missed speech) for several frames after reset.
+   * This was the root cause of the "app stops picking up sound after silence" bug.
+   *
+   * Only reset the full model state when explicitly stopping capture
+   * (see `resetFull()`).
    */
   reset(): void {
+    this.debounce = {
+      isSpeech: false,
+      speechFrameCount: 0,
+      silenceFrameCount: 0,
+      // Keep the pre-buffer rolling — don't clear it on speech end.
+      // Audio already in the pre-buffer belongs to the gap between segments,
+      // which is useful context if speech starts again soon.
+      preBuffer: this.debounce.preBuffer,
+      preBufferSamples: this.debounce.preBufferSamples,
+    };
+  }
+
+  /**
+   * Full reset including Silero model hidden state.
+   * Use only when stopping capture entirely (e.g., user stops recording),
+   * NOT between speech segments.
+   */
+  resetFull(): void {
     this.debounce = {
       isSpeech: false,
       speechFrameCount: 0,
@@ -401,7 +427,7 @@ export class VadService {
       this.session = null;
     }
     this.initialized = false;
-    this.reset();
+    this.resetFull();
   }
 }
 

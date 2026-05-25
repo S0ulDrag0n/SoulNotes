@@ -263,11 +263,11 @@ export function useRealtimeTranscription(
     // Clear intervals and timeouts
     clearTimers();
 
-    // Reset VAD state
+    // Reset VAD state (full reset when stopping capture)
     if (vadInitializedRef.current) {
       try {
         const vadService = getVadService();
-        vadService.reset();
+        vadService.resetFull();
       } catch {
         // Ignore VAD cleanup errors
       }
@@ -631,14 +631,17 @@ export function useRealtimeTranscription(
             // Pre-buffer is at 16kHz (VAD sample rate) — upsample to 24kHz for Whisper
             const preBuffer24k = upsample16to24(preBuffer);
             const preBufferBase64 = int16ToBase64(preBuffer24k);
-            wsRef.current.send(
-              JSON.stringify({ type: 'input_audio_buffer.append', audio: preBufferBase64 })
-            );
+            if (wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(
+                JSON.stringify({ type: 'input_audio_buffer.append', audio: preBufferBase64 })
+              );
+            }
           }
         }
         
-        // Only send audio if speech is detected
-        if (!vadResult.isSpeech && !vadResult.speechStart) {
+        // Send audio if speech is detected OR this is the final chunk where speech ends.
+        // On speechEnd, isSpeech is false but we still need to send this last chunk.
+        if (!vadResult.isSpeech && !vadResult.speechStart && !vadResult.speechEnd) {
           // Don't send silence to transcription
           return;
         }
@@ -648,13 +651,22 @@ export function useRealtimeTranscription(
         
         // Convert Int16Array to base64 and send
         const base64 = int16ToBase64(pcm16);
-        wsRef.current.send(
-          JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 })
-        );
+        if (wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 })
+          );
+        }
         
-        // Reset VAD state when speech ends
+        // When speech ends: reset debounce counters and commit audio buffer
+        // so the server finalizes the utterance. Do NOT reset model state —
+        // the Silero model needs its hidden state to stay warm for the next
+        // speech segment.
         if (vadResult.speechEnd) {
           vadService.reset();
+          // Commit the audio buffer so the server processes the utterance
+          if (wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+          }
         }
       } catch (error) {
         console.error('[RealtimeTranscription] VAD inference error, passing audio through:', error);
