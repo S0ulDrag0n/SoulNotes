@@ -47,6 +47,55 @@ function buildRealtimeUrl(baseUrl: string, model: string, language: string, inte
   return `${url}?intent=${encodeURIComponent(intent)}&model=${encodeURIComponent(model)}&language=${encodeURIComponent(language)}`;
 }
 
+// ---------------------------------------------------------------------
+// Hallucination detection: filter Whisper's repetitive garbage output
+// Whisper on silence/noise produces patterns like "press again, press again, press again"
+// We detect when the same short phrase repeats 3+ times and suppress it.
+// ---------------------------------------------------------------------
+function isHallucination(text: string): boolean {
+  const normalized = text
+    .replace(/[.!?,\u2026;:\u2013\u2014]+$/g, '') // Strip trailing punctuation
+    .trim()
+    .toLowerCase();
+  if (!normalized) return false;
+
+  // Try splitting on common delimiters (commas, periods, exclamation, newlines)
+  const segments = normalized
+    .split(/[,.!?:;]+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+
+  // If we have 3+ segments, check if any phrase repeats 3+ times consecutively
+  if (segments.length >= 3) {
+    for (let i = 0; i <= segments.length - 3; i++) {
+      if (segments[i] === segments[i + 1] && segments[i] === segments[i + 2]) {
+        return true;
+      }
+    }
+  }
+
+  // Also check if the entire normalized text is a repetition of a short phrase
+  // e.g. "press again press again press again" (no delimiter between repeats)
+  if (normalized.length >= 6) {
+    const words = normalized.split(/\s+/);
+    for (let phraseLen = 2; phraseLen <= Math.floor(words.length / 3); phraseLen++) {
+      const phrase = words.slice(0, phraseLen).join(' ');
+      let count = 0;
+      for (let i = 0; i <= words.length - phraseLen; i += phraseLen) {
+        if (words.slice(i, i + phraseLen).join(' ') === phrase) {
+          count++;
+        }
+      }
+      // If the same phrase appears 3+ times and dominates the text
+      if (count >= 3 && (count * phraseLen) >= words.length * 0.75) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export function useRealtimeTranscription(
   options: UseRealtimeTranscriptionOptions
 ): UseRealtimeTranscriptionReturn {
@@ -101,6 +150,12 @@ export function useRealtimeTranscription(
   const appendTranscript = useCallback((text: string, isFinal: boolean = true) => {
     const trimmed = text.trim();
     if (!trimmed) return;
+
+    // Filter hallucinations on final transcripts
+    if (isFinal && isHallucination(trimmed)) {
+      console.warn('[RealtimeTranscription] Filtered hallucination:', trimmed.substring(0, 100));
+      return;
+    }
 
     if (isFinal) {
       const newMessage: TranscriptMessage = {
