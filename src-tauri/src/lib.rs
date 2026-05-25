@@ -751,6 +751,170 @@ fn get_default_config() -> AppConfig {
     AppConfig::default()
 }
 
+// ---------------------------------------------------------------------
+// Model Listing Commands
+// ---------------------------------------------------------------------
+
+/// Response structure for Ollama /api/tags
+#[derive(serde::Serialize, serde::Deserialize)]
+struct OllamaModelsResponse {
+    models: Vec<OllamaModel>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct OllamaModel {
+    name: String,
+    #[serde(default)]
+    modified_at: Option<String>,
+    #[serde(default)]
+    size: Option<u64>,
+}
+
+/// Response structure for OpenAI /v1/models
+#[derive(serde::Serialize, serde::Deserialize)]
+struct OpenAIModelsResponse {
+    data: Vec<OpenAIModel>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct OpenAIModel {
+    id: String,
+    #[serde(default)]
+    owned_by: Option<String>,
+}
+
+/// Model info returned to the frontend
+#[derive(serde::Serialize)]
+struct ModelInfo {
+    id: String,
+    name: String,
+    provider: String,
+}
+
+/// Fetch available models from an Ollama server
+#[tauri::command]
+async fn fetch_ollama_models(base_url: String, api_token: Option<String>) -> Result<Vec<ModelInfo>, String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+    
+    let mut request = client.get(&url);
+    if let Some(ref token) = api_token {
+        if !token.is_empty() {
+            request = request.bearer_auth(token);
+        }
+    }
+    
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect to Ollama server: {}", e))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Ollama API error ({}): {}", status, error_text));
+    }
+    
+    let body: OllamaModelsResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Ollama response: {}", e))?;
+    
+    let models = body.models
+        .into_iter()
+        .map(|m| ModelInfo {
+            id: m.name.clone(),
+            name: m.name,
+            provider: "ollama".to_string(),
+        })
+        .collect();
+    
+    Ok(models)
+}
+
+/// Fetch available models from an OpenAI-compatible server
+#[tauri::command]
+async fn fetch_openai_compatible_models(base_url: String, api_token: Option<String>) -> Result<Vec<ModelInfo>, String> {
+    let client = reqwest::Client::new();
+    // Strip /v1 suffix if present — we add it ourselves
+    let normalized_url = base_url.trim_end_matches('/');
+    let normalized_url = normalized_url.strip_suffix("/v1").unwrap_or(normalized_url);
+    let url = format!("{}/v1/models", normalized_url);
+    
+    let mut request = client.get(&url);
+    if let Some(ref token) = api_token {
+        if !token.is_empty() {
+            request = request.bearer_auth(token);
+        }
+    }
+    
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect to OpenAI-compatible server: {}", e))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("OpenAI-compatible API error ({}): {}", status, error_text));
+    }
+    
+    let body: OpenAIModelsResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse OpenAI-compatible response: {}", e))?;
+    
+    let models = body.data
+        .into_iter()
+        .map(|m| ModelInfo {
+            id: m.id.clone(),
+            name: m.id,
+            provider: "openai-compatible".to_string(),
+        })
+        .collect();
+    
+    Ok(models)
+}
+
+/// Fetch available models from a Speaches server (OpenAI-compatible /v1/models)
+#[tauri::command]
+async fn fetch_speaches_models(base_url: String, _api_token: Option<String>) -> Result<Vec<ModelInfo>, String> {
+    let client = reqwest::Client::new();
+    let normalized_url = base_url.trim_end_matches('/');
+    let normalized_url = normalized_url.strip_suffix("/v1").unwrap_or(normalized_url);
+    let url = format!("{}/v1/models", normalized_url);
+    
+    // Speaches doesn't require auth, but we accept the arg for API consistency
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect to Speaches server: {}", e))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Speaches API error ({}): {}", status, error_text));
+    }
+    
+    // Speaches returns the same OpenAI-style format
+    let body: OpenAIModelsResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Speaches response: {}", e))?;
+    
+    let models = body.data
+        .into_iter()
+        .map(|m| ModelInfo {
+            id: m.id.clone(),
+            name: m.id,
+            provider: "speaches".to_string(),
+        })
+        .collect();
+    
+    Ok(models)
+}
+
 // Save device settings to config
 #[tauri::command]
 fn save_device_settings(
@@ -1444,6 +1608,9 @@ pub fn run() {
         get_config,
         save_config,
         get_default_config,
+        fetch_ollama_models,
+        fetch_openai_compatible_models,
+        fetch_speaches_models,
         save_device_settings,
         translate_text,
         summarize_text,
