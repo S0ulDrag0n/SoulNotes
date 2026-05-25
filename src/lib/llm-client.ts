@@ -134,8 +134,14 @@ class OpenAICompatibleLLMClient {
   private apiToken?: string;
 
   constructor(baseUrl: string, apiToken?: string) {
-    // Normalize: strip trailing slash, ensure /v1 path
-    this.baseUrl = baseUrl.replace(/\/+$/, '');
+    // Normalize: strip trailing slash
+    let normalized = baseUrl.replace(/\/+$/, '');
+    // Strip /v1 suffix if present — we add it back in request URLs.
+    // This prevents double /v1/v1 if the user includes it in their base URL.
+    if (normalized.endsWith('/v1')) {
+      normalized = normalized.slice(0, -3);
+    }
+    this.baseUrl = normalized;
     this.apiToken = apiToken;
   }
 
@@ -330,6 +336,9 @@ export class LLMClient {
    * Convenience: translate using the configured translate model
    */
   async translate(messages: LLMMessage[]): Promise<LLMResponse> {
+    if (!this.config.translateModel) {
+      throw new Error('No translate model configured for the active LLM provider');
+    }
     return this.chat(this.config.translateModel, messages, {
       temperature: OLLAMA_OPTIONS.temperature,
       topP: OLLAMA_OPTIONS.topP,
@@ -341,6 +350,9 @@ export class LLMClient {
    * Convenience: translate with streaming
    */
   async *translateStream(messages: LLMMessage[]): AsyncGenerator<LLMStreamChunk> {
+    if (!this.config.translateModel) {
+      throw new Error('No translate model configured for the active LLM provider');
+    }
     yield* this.chatStream(this.config.translateModel, messages, {
       temperature: OLLAMA_OPTIONS.temperature,
       topP: OLLAMA_OPTIONS.topP,
@@ -352,6 +364,9 @@ export class LLMClient {
    * Convenience: summarize using the configured summarize model
    */
   async summarize(messages: LLMMessage[]): Promise<LLMResponse> {
+    if (!this.config.summarizeModel) {
+      throw new Error('No summarize model configured for the active LLM provider');
+    }
     return this.chat(this.config.summarizeModel, messages, {
       temperature: OLLAMA_OPTIONS.temperature,
       topP: OLLAMA_OPTIONS.topP,
@@ -363,6 +378,9 @@ export class LLMClient {
    * Convenience: conversation using the configured conversation model
    */
   async converse(messages: LLMMessage[]): Promise<LLMResponse> {
+    if (!this.config.conversationModel) {
+      throw new Error('No conversation model configured for the active LLM provider');
+    }
     return this.chat(this.config.conversationModel, messages, {
       temperature: 0.7,
       topP: OLLAMA_OPTIONS.topP,

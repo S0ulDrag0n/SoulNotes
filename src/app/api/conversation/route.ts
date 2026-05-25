@@ -1,8 +1,6 @@
 // src/app/api/conversation/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
 import {
   SCENARIO_CONFIGS,
   DIFFICULTY_CONFIGS,
@@ -11,8 +9,9 @@ import {
   type Correction,
   type LearningProfile,
 } from '@/types/conversation';
-import { OLLAMA_OPTIONS, LANGUAGE_LABELS, CONFIG_PATHS } from '@/lib/constants';
+import { LANGUAGE_LABELS } from '@/lib/constants';
 import { LLMClient, buildLLMConfig } from '@/lib/llm-client';
+import { loadConfig } from '@/lib/load-config';
 
 interface ConversationRequest {
   messages: Array<{
@@ -23,67 +22,6 @@ interface ConversationRequest {
   scenario: ConversationScenario;
   difficulty: DifficultyLevel;
   learningProfile?: LearningProfile;
-}
-
-type RawAppConfig = {
-  llm_provider?: string;
-  ollama_base_url?: string;
-  ollama_api_token?: string;
-  ollama_conversation_model?: string;
-  openai_compatible_base_url?: string;
-  openai_compatible_api_token?: string;
-  openai_compatible_conversation_model?: string;
-};
-
-function loadConfig(): RawAppConfig {
-  const configPaths = [
-    join(process.cwd(), CONFIG_PATHS.primary),
-    join(process.cwd(), CONFIG_PATHS.secondary),
-    CONFIG_PATHS.docker,
-  ];
-
-  for (const configPath of configPaths) {
-    if (existsSync(configPath)) {
-      try {
-        const content = readFileSync(configPath, 'utf-8');
-        const config: RawAppConfig = {};
-        const lines = content.split('\n');
-        
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) continue;
-          
-          const colonIndex = trimmed.indexOf(':');
-          if (colonIndex === -1) continue;
-          
-          const key = trimmed.slice(0, colonIndex).trim();
-          let value = trimmed.slice(colonIndex + 1).trim();
-          
-          if ((value.startsWith('"') && value.endsWith('"')) ||
-              (value.startsWith("'") && value.endsWith("'"))) {
-            value = value.slice(1, -1);
-          }
-          
-          if (value === 'null' || value === '~') continue;
-          
-          const knownKeys = [
-            'llm_provider', 'ollama_base_url', 'ollama_api_token',
-            'ollama_conversation_model', 'openai_compatible_base_url',
-            'openai_compatible_api_token', 'openai_compatible_conversation_model',
-          ];
-          if (knownKeys.includes(key)) {
-            (config as Record<string, string>)[key] = value;
-          }
-        }
-        
-        return config;
-      } catch (error) {
-        console.error(`Error loading config from ${configPath}:`, error);
-      }
-    }
-  }
-  
-  return {};
 }
 
 export async function POST(request: NextRequest) {
