@@ -1,6 +1,6 @@
 // Transcript panel component showing live transcript with text selection support
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, memo } from 'react';
 import type { TranscriptMessage } from '@/hooks/useRealtimeTranscription';
 import { UI_SCROLL } from '@/lib/constants';
 import { SelectableText } from '@/components/SelectableText';
@@ -23,7 +23,7 @@ function scrollToBottom(element: HTMLElement): void {
   element.scrollTop = element.scrollHeight;
 }
 
-export function TranscriptPanel({ 
+export const TranscriptPanel = memo(function TranscriptPanel({ 
   transcriptMessages, 
   isTranscribing, 
   sourceLanguage,
@@ -123,4 +123,4 @@ export function TranscriptPanel({
       </div>
     </div>
   );
-}
+});

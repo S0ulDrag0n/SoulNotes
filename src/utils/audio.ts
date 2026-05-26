@@ -1,7 +1,5 @@
 // Audio processing utilities for realtime transcription
 
-import { AUDIO_ENCODING } from '@/lib/constants';
-
 // ---------------------------------------------------------------------
 // Convert float32 audio data to 16-bit PCM
 // ---------------------------------------------------------------------
@@ -47,12 +45,18 @@ export function downsampleBuffer(
 // Convert Int16Array to base64 string
 // ---------------------------------------------------------------------
 export function int16ToBase64(input: Int16Array): string {
-  const byteView = new Uint8Array(input.buffer);
+  const bytes = (input.byteOffset === 0 && input.byteLength === input.buffer.byteLength)
+    ? new Uint8Array(input.buffer)
+    : new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+
+  // Process in 8KB chunks using apply() — avoids spread operator stack overflow
+  // and is significantly faster than per-byte string concatenation
+  const CHUNK = 8192;
   let binary = '';
-  const chunkSize = AUDIO_ENCODING.base64ChunkSize;
-  for (let i = 0; i < byteView.length; i += chunkSize) {
-    const slice = byteView.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...slice);
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const end = Math.min(i + CHUNK, bytes.length);
+    const chunk = Array.from(bytes.subarray(i, end));
+    binary += String.fromCharCode.apply(null, chunk);
   }
   return btoa(binary);
 }

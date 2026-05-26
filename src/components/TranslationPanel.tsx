@@ -1,6 +1,6 @@
 // Translation panel component showing live translation with text selection support
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, memo } from 'react';
 import type { TranslationMessage } from '@/hooks/useTranslation';
 import { UI_SCROLL } from '@/lib/constants';
 import { SelectableText } from '@/components/SelectableText';
@@ -24,7 +24,7 @@ function scrollToBottom(element: HTMLElement): void {
   element.scrollTop = element.scrollHeight;
 }
 
-export function TranslationPanel({
+export const TranslationPanel = memo(function TranslationPanel({
   translationMessages,
   isTranslating,
   sourceLanguage,
@@ -147,4 +147,4 @@ export function TranslationPanel({
       </div>
     </div>
   );
-}
+});

@@ -135,7 +135,8 @@ export const AUDIO_DEFAULTS = {
 
 /** Realtime transcription audio settings */
 export const REALTIME_AUDIO = {
-  sampleRate: 24000,
+  /** 16kHz — Whisper's native rate. Eliminates client-side resampling. */
+  sampleRate: 16000,
   processorBufferSize: 4096,
 } as const;
 
@@ -149,8 +150,14 @@ export const WEBSOCKET_CONFIG = {
   connectionTimeout: 10000,
   // Ping interval in ms
   pingInterval: 30000,
-  // Auto-reset interval in ms (5 minutes) - to release server GPU memory
-  autoResetInterval: 5 * 60 * 1000,
+} as const;
+
+/** Silence-gated auto-reset configuration */
+export const SILENCE_RESET = {
+  /** Minimum silence duration before auto-reset is considered (ms) */
+  minSilenceMs: 3000,
+  /** Maximum time before forcing a reset even during speech (ms) — safety valve */
+  maxSessionMs: 10 * 60 * 1000, // 10 minutes
 } as const;
 
 // ---------------------------------------------------------------------------
