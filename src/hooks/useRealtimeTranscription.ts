@@ -200,6 +200,11 @@ export function useRealtimeTranscription(
     try {
       const data = JSON.parse(message);
 
+      // Debug: log parsed message types
+      if (data?.type) {
+        console.log('[RealtimeTranscription] Parsed message type:', data.type);
+      }
+
       // Handle streaming transcripts (partial/interim results)
       if (data?.type === 'conversation.item.input_audio_transcription.delta') {
         const delta = data.delta ?? data.text ?? data.content ?? data?.data?.text;
@@ -603,6 +608,7 @@ export function useRealtimeTranscription(
 
     ws.onmessage = (event) => {
       if (typeof event.data === 'string') {
+        console.log('[RealtimeTranscription] WS message received, length:', event.data.length, 'type:', event.data.substring(0, 120));
         parseRealtimeMessage(event.data);
       }
     };
@@ -637,12 +643,17 @@ export function useRealtimeTranscription(
     // ----------------------------------------------------------------
     const useWorklet = typeof audioContext.audioWorklet !== 'undefined';
 
+    let _sendCount = 0;
     const sendPcm16 = (pcm16: Int16Array) => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
       const base64 = int16ToBase64(pcm16);
       wsRef.current.send(
         JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 }),
       );
+      _sendCount++;
+      if (_sendCount <= 3 || _sendCount % 50 === 0) {
+        console.log(`[RealtimeTranscription] Sent audio chunk #${_sendCount} (${pcm16.length} samples, ctx=${audioContext.sampleRate}Hz)`);
+      }
     };
 
     if (useWorklet) {
@@ -651,6 +662,7 @@ export function useRealtimeTranscription(
         await audioContext.audioWorklet.addModule(AUDIO_WORKLET_URL);
         const workletNode = new AudioWorkletNode(audioContext, 'audio-processor');
 
+        const _workletChunkLog = { count: 0 };
         workletNode.port.onmessage = (event: MessageEvent) => {
           // Track that we're receiving audio events
           lastAudioSentTimeRef.current = Date.now();
@@ -659,6 +671,10 @@ export function useRealtimeTranscription(
             // Worklet already converts to Int16 at the native sample rate.
             // If AudioContext.sampleRate differs from target, downsample here.
             let pcm16: Int16Array = event.data.pcm16;
+            _workletChunkLog.count++;
+            if (_workletChunkLog.count <= 3 || _workletChunkLog.count % 50 === 0) {
+              console.log('[RealtimeTranscription] Worklet audio chunk:', pcm16.length, 'samples, ctxRate:', audioContext.sampleRate, 'targetRate:', REALTIME_AUDIO.sampleRate);
+            }
             if (audioContext.sampleRate !== REALTIME_AUDIO.sampleRate) {
               // Downsample: Int16 → Float32 → downsample → Float32 → Int16
               const float32 = new Float32Array(pcm16.length);
