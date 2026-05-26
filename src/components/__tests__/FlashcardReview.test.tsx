@@ -490,7 +490,7 @@ describe('FlashcardReview', () => {
         expect(screen.getByText('Session Complete!')).toBeDefined();
       });
 
-      // Click "Continue" to restart (ReviewSummary shows this button)
+      // Click "Continue" to restart (ReviewSummary component)
       fireEvent.click(screen.getByText('Continue'));
 
       // Should show first card again (or "All Caught Up" if no cards due)
