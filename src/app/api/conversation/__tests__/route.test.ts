@@ -5,9 +5,9 @@ import { DEFAULT_OLLAMA_CONFIG } from '@/lib/constants';
 // Mock LLMClient to avoid real API calls
 const mockConverse = vi.fn();
 vi.mock('@/lib/llm-client', () => ({
-  LLMClient: vi.fn().mockImplementation(() => ({
-    converse: mockConverse,
-  })),
+  LLMClient: vi.fn().mockImplementation(function(this: any, _config: any) {
+    this.converse = mockConverse;
+  }),
   buildLLMConfig: vi.fn(() => ({
     provider: 'ollama',
     ollamaBaseUrl: 'http://localhost:11434',

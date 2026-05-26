@@ -490,8 +490,9 @@ describe('FlashcardReview', () => {
         expect(screen.getByText('Session Complete!')).toBeDefined();
       });
 
-      // Click "Continue" to restart (ReviewSummary shows this button)
-      fireEvent.click(screen.getByText('Continue'));
+      // Click "Start New Session" to restart (fallback summary shows this button,
+      // ReviewSummary shows "Continue" when currentSession is available)
+      fireEvent.click(screen.getByText('Start New Session'));
 
       // Should show first card again (or "All Caught Up" if no cards due)
       await waitFor(() => {
