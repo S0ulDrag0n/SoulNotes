@@ -11,10 +11,14 @@ vi.mock('ollama', () => ({
 }));
 
 // Mock fs module for config loading
-vi.mock('fs', () => ({
-  readFileSync: vi.fn(() => ''),
-  existsSync: vi.fn(() => false),
-}));
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    readFileSync: vi.fn(() => ''),
+    existsSync: vi.fn(() => false),
+  };
+})
 
 describe('Conversation API Route', () => {
   beforeEach(() => {

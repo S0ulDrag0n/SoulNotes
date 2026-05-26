@@ -28,6 +28,7 @@ const mockDBMethods = {
   deleteFlashcard: vi.fn(),
   deleteFlashcardsForVocabulary: vi.fn(),
   init: vi.fn(),
+  recalculateAllDeckStats: vi.fn(),
 };
 
 // Mock the vocabulary-db module - use the same path as the import in useVocabulary.ts
@@ -52,6 +53,7 @@ function resetAllMocks() {
   mockDBMethods.getAllFlashcards.mockResolvedValue([]);
   mockDBMethods.getDueCards.mockResolvedValue([]);
   mockDBMethods.getDueCardsForDeck.mockResolvedValue([]);
+  mockDBMethods.recalculateAllDeckStats.mockResolvedValue([]);
   mockDBMethods.init.mockResolvedValue(undefined);
   mockDBMethods.getDeck.mockResolvedValue(null);
   mockDBMethods.getItem.mockResolvedValue(null);
