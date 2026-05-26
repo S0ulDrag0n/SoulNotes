@@ -520,48 +520,58 @@ export function useRealtimeTranscription(
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
       const now = Date.now();
-      const silenceMs = now - lastMessageTimeRef.current;
       const sessionMs = now - sessionStartTimeRef.current;
 
-      // Only consider reset if we've been running for at least minSilenceMs
-      // AND there has been silence for at least minSilenceMs
-      if (silenceMs >= SILENCE_RESET.minSilenceMs) {
-        console.log(`[RealtimeTranscription] Auto-reset: silence detected (${silenceMs}ms), session duration ${sessionMs}ms`);
-        // Commit and clear any pending audio buffer
-        try {
-          wsRef.current!.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-          wsRef.current!.send(JSON.stringify({ type: 'input_audio_buffer.clear' }));
-        } catch { /* Ignore errors */ }
-        
-        // Close WebSocket but preserve MediaStream
-        wsRef.current!.close();
-        wsRef.current = null;
+      // Use audio send activity (lastAudioSentTimeRef) instead of server messages
+      // (lastMessageTimeRef). The server only sends messages when it has a
+      // transcript to return, so "no server message" ≠ silence. If we're
+      // actively sending audio, we should NOT reset.
+      const audioSilenceMs = now - (lastAudioSentTimeRef.current || sessionStartTimeRef.current);
 
-        // Clean up audio processing but preserve MediaStream
-        if (processorRef.current) {
-          processorRef.current.disconnect();
-          processorRef.current = null;
-        }
-        if (audioContextRef.current) {
-          audioContextRef.current.close();
-          audioContextRef.current = null;
-        }
+      // Don't consider reset if:
+      // 1. We're still sending audio (audioSilenceMs < minSilenceMs means
+      //    audio chunks are flowing, so we're not truly silent)
+      // 2. The session just started (need a grace period for the server to
+      //    respond — at least one minSilenceMs cycle after connect)
+      if (audioSilenceMs < SILENCE_RESET.minSilenceMs) return;
+      if (sessionMs < SILENCE_RESET.minSilenceMs * 2) return;
 
-        // Clear timers (including this interval and the safety valve)
-        if (autoResetTimeoutRef.current) {
-          clearTimeout(autoResetTimeoutRef.current);
-          autoResetTimeoutRef.current = null;
-        }
-        if (silenceCheckIntervalRef.current) {
-          clearInterval(silenceCheckIntervalRef.current);
-          silenceCheckIntervalRef.current = null;
-        }
+      const messageSilenceMs = now - lastMessageTimeRef.current;
+      console.log(`[RealtimeTranscription] Auto-reset: audio silence detected (${audioSilenceMs}ms), no server messages for ${messageSilenceMs}ms, session duration ${sessionMs}ms`);
+      // Commit and clear any pending audio buffer
+      try {
+        wsRef.current!.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+        wsRef.current!.send(JSON.stringify({ type: 'input_audio_buffer.clear' }));
+      } catch { /* Ignore errors */ }
+      
+      // Close WebSocket but preserve MediaStream
+      wsRef.current!.close();
+      wsRef.current = null;
 
-        isAutoResetRef.current = true;
-        isReconnectingRef.current = true;
-        reconnectAttemptsRef.current = 0;
-        attemptReconnectRef.current();
+      // Clean up audio processing but preserve MediaStream
+      if (processorRef.current) {
+        processorRef.current.disconnect();
+        processorRef.current = null;
       }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+
+      // Clear timers (including this interval and the safety valve)
+      if (autoResetTimeoutRef.current) {
+        clearTimeout(autoResetTimeoutRef.current);
+        autoResetTimeoutRef.current = null;
+      }
+      if (silenceCheckIntervalRef.current) {
+        clearInterval(silenceCheckIntervalRef.current);
+        silenceCheckIntervalRef.current = null;
+      }
+
+      isAutoResetRef.current = true;
+      isReconnectingRef.current = true;
+      reconnectAttemptsRef.current = 0;
+      attemptReconnectRef.current();
     }, 5000); // Check every 5 seconds
   }, []);
 
