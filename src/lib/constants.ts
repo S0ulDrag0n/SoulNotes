@@ -135,8 +135,13 @@ export const AUDIO_DEFAULTS = {
 
 /** Realtime transcription audio settings */
 export const REALTIME_AUDIO = {
-  /** 16kHz — Whisper's native rate. Eliminates client-side resampling. */
-  sampleRate: 16000,
+  /**
+   * 24kHz PCM16 — the wire format required by the OpenAI Realtime API
+   * (and Speaches, which decodes at 24kHz then resamples to 16kHz
+   * server-side for Whisper/VAD). Do NOT change this to 16kHz: the server
+   * would misinterpret the stream and produce no/garbled transcripts.
+   */
+  sampleRate: 24000,
   processorBufferSize: 4096,
 } as const;
 

@@ -99,6 +99,7 @@ export default function Home() {
     stopTranscription,
     sendAudioData,
     clearTranscript,
+    warmConnection,
   } = useRealtimeTranscription({
     baseUrl: realtimeConfig.baseUrl,
     model: realtimeConfig.transcribeModel,
@@ -307,6 +308,7 @@ export default function Home() {
             systemDevices={systemDevices}
             onStartRecording={handleStartRecording}
             onStopRecording={handleStopRecording}
+            onWarmConnection={isDesktop ? warmConnection : undefined}
           />
         </section>
 

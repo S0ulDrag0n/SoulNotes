@@ -118,6 +118,18 @@ This eliminates the resampling step entirely for the web path. The `downsampleBu
 
 **Estimated savings:** 10-30ms (eliminating resampling)
 
+> **STATUS UPDATE — 1.3 was attempted and REVERTED.** Sending 16kHz audio to `/v1/realtime`
+> violates the OpenAI Realtime API wire format, which Speaches implements: the server
+> decodes `input_audio_buffer.append` payloads at a fixed 24kHz
+> (`audio_samples_from_file(..., 24000)`) and resamples to 16kHz server-side for
+> Whisper/VAD (`resample_audio_data(audio_chunk, 24000, 16000)` in
+> `speaches/realtime/input_audio_buffer_event_router.py`). A 16kHz client stream is
+> interpreted as 24kHz (1.5x pitch/speed corruption), producing no usable transcripts —
+> this is why web-mode transcription "produced no output" during development of this
+> branch. `REALTIME_AUDIO.sampleRate` MUST stay at 24000. The client-side
+> `downsampleBuffer` call remains a no-op in practice because the AudioContext is
+> constructed at 24kHz.
+
 ### Phase 2: VAD Pipeline Optimization (est. ~30-60ms saved)
 
 #### 2.1 Separate VAD from Audio Send Path (Critical)
@@ -230,7 +242,7 @@ Priority is highest-impact, lowest-risk changes first:
 
 | Step | Change | Est. Latency Saved | Risk | Effort |
 |------|--------|--------------------|------ |--------|
-| **1** | Phase 1.3: Request 16kHz AudioContext directly | 10-30ms | Low — one config change | Tiny |
+| ~~**1**~~ | ~~Phase 1.3: Request 16kHz AudioContext directly~~ — **reverted: violates the 24kHz realtime wire format** | ~~10-30ms~~ | — | — |
 | **2** | Phase 1.2: Optimize `int16ToBase64` | 5-15ms | Low — pure function swap | Tiny |
 | **3** | Phase 3.2: Memoize transcript/translation panels | 10-30ms | Low — `React.memo` | Small |
 | **4** | Phase 4.2: Pre-warm WebSocket on hover | 100-300ms | Medium — connection lifecycle | Medium |

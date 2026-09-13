@@ -553,6 +553,11 @@ export function useRealtimeTranscription(
         processorRef.current.disconnect();
         processorRef.current = null;
       }
+      if (workletNodeRef.current) {
+        workletNodeRef.current.port.onmessage = null;
+        workletNodeRef.current.disconnect();
+        workletNodeRef.current = null;
+      }
       if (audioContextRef.current) {
         audioContextRef.current.close();
         audioContextRef.current = null;
@@ -900,9 +905,18 @@ export function useRealtimeTranscription(
   // ready when the user clicks start. Does NOT start audio capture.
   // ---------------------------------------------------------------------
   const warmConnection = useCallback(() => {
-    // If we already have a pre-warmed connection that's still open, skip
-    if (preWarmedWsRef.current && preWarmedWsRef.current.readyState === WebSocket.OPEN) {
+    // Skip if we already have a pre-warmed connection that's open or opening
+    if (
+      preWarmedWsRef.current &&
+      (preWarmedWsRef.current.readyState === WebSocket.OPEN ||
+        preWarmedWsRef.current.readyState === WebSocket.CONNECTING)
+    ) {
       return;
+    }
+
+    // Clean up any closed/closing leftover before creating a fresh one
+    if (preWarmedWsRef.current) {
+      preWarmedWsRef.current = null;
     }
 
     const wsUrl = buildRealtimeUrl(baseUrl, model, language, intent);
@@ -953,17 +967,38 @@ export function useRealtimeTranscription(
         // For external audio, set up WebSocket — reuse pre-warmed connection if available
         let ws: WebSocket;
 
-        if (preWarmedWsRef.current && preWarmedWsRef.current.readyState === WebSocket.OPEN) {
-          // Reuse pre-warmed connection
-          ws = preWarmedWsRef.current;
+        if (preWarmedWsRef.current) {
+          const preWarmed = preWarmedWsRef.current;
           preWarmedWsRef.current = null;
-        } else {
-          // Clean up stale pre-warmed connection if any
-          if (preWarmedWsRef.current) {
-            preWarmedWsRef.current.close();
-            preWarmedWsRef.current = null;
-          }
 
+          if (preWarmed.readyState === WebSocket.OPEN) {
+            // Reuse pre-warmed connection — re-send session.update in case
+            // the language or model changed since the connection was warmed
+            ws = preWarmed;
+            sendSessionUpdate(ws, language);
+          } else if (preWarmed.readyState === WebSocket.CONNECTING) {
+            // Wait for the in-flight pre-warm to finish (or fail)
+            await new Promise<void>((resolve, reject) => {
+              preWarmed.onopen = () => resolve();
+              preWarmed.onclose = () => reject(new Error('Realtime WebSocket closed'));
+              preWarmed.onerror = () => reject(new Error('Realtime WebSocket error'));
+            });
+            ws = preWarmed;
+            sendSessionUpdate(ws, language);
+          } else {
+            // CLOSING/CLOSED — clean up and fall through to a fresh connection
+            if (preWarmed.readyState === WebSocket.CLOSING) {
+              preWarmed.close();
+            }
+            ws = new WebSocket(buildRealtimeUrl(baseUrl, model, language, intent));
+            await new Promise<void>((resolve, reject) => {
+              ws.onopen = () => resolve();
+              ws.onclose = () => reject(new Error('Realtime WebSocket closed'));
+              ws.onerror = () => reject(new Error('Realtime WebSocket error'));
+            });
+            sendSessionUpdate(ws, language);
+          }
+        } else {
           ws = new WebSocket(buildRealtimeUrl(baseUrl, model, language, intent));
 
           await new Promise<void>((resolve, reject) => {
