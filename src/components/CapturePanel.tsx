@@ -16,6 +16,8 @@ interface CapturePanelProps {
   // Event handlers
   onStartRecording: () => void;
   onStopRecording: () => void;
+  /** Pre-warm the transcription WebSocket (called on Start button hover/focus) */
+  onWarmConnection?: () => void;
 }
 
 export function CapturePanel({
@@ -24,6 +26,7 @@ export function CapturePanel({
   systemDevices,
   onStartRecording,
   onStopRecording,
+  onWarmConnection,
 }: CapturePanelProps) {
   // Get state from stores
   const { sourceLanguage, chineseVariant, setSourceLanguage } = useAppState();
@@ -98,6 +101,8 @@ export function CapturePanel({
         <div className="flex flex-wrap gap-3">
           <button
             onClick={onStartRecording}
+            onPointerEnter={onWarmConnection}
+            onFocus={onWarmConnection}
             disabled={isRecording || isProcessing}
             className="flex-1 rounded-xl bg-[#1f1c16] px-4 py-2 text-sm font-semibold text-[#f6e9cc] transition hover:bg-[#342d22] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#f6e9cc] dark:text-[#1f1c16] dark:hover:bg-[#e9d3a7]"
           >

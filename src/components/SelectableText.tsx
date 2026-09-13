@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, memo } from 'react';
 import { useTextSelection } from '@/hooks/useTextSelection';
 import { TextSelectionToolbar } from '@/components/TextSelectionToolbar';
 
@@ -15,7 +15,7 @@ export interface SelectableTextProps {
   readonly className?: string;
 }
 
-export function SelectableText({
+export const SelectableText = memo(function SelectableText({
   children,
   sourceLanguage,
   targetLanguage,
@@ -51,4 +51,4 @@ export function SelectableText({
       )}
     </div>
   );
-}
+});

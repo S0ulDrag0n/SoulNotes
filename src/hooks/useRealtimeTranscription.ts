@@ -3,11 +3,16 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { floatTo16BitPCM, downsampleBuffer, int16ToBase64 } from '@/utils/audio';
 import { generateMessageId } from '@/utils/text';
-import { REALTIME_AUDIO, REALTIME_SESSION_INSTRUCTIONS, WEBSOCKET_CONFIG } from '@/lib/constants';
+import { REALTIME_AUDIO, REALTIME_SESSION_INSTRUCTIONS, SILENCE_RESET, WEBSOCKET_CONFIG } from '@/lib/constants';
 import { useNotifications } from '@/contexts/NotificationContext';
 import type { DebugCategory } from '@/types/notifications';
 import { getVadService, downsample24to16, upsample16to24 } from '@/lib/vad-service';
 import { isHallucination } from '@/lib/hallucination-filter';
+
+// ---------------------------------------------------------------------
+// AudioWorklet URL — resolves to the pre-compiled JS file in /public
+// ---------------------------------------------------------------------
+const AUDIO_WORKLET_URL = '/worklets/audio-processor.worklet.js';
 
 export interface TranscriptMessage {
   id: string;
@@ -37,6 +42,8 @@ export interface UseRealtimeTranscriptionReturn {
   sendAudioData: (pcm16: Int16Array) => void;
   /** Clear all transcript messages */
   clearTranscript: () => void;
+  /** Pre-warm the WebSocket connection so startTranscription can reuse it */
+  warmConnection: () => void;
 }
 
 // ---------------------------------------------------------------------
@@ -60,7 +67,8 @@ export function useRealtimeTranscription(
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | AudioWorkletNode | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null); // separate ref for worklet-specific cleanup
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const currentMessageRef = useRef<TranscriptMessage | null>(null);
 
@@ -73,13 +81,23 @@ export function useRealtimeTranscription(
   const healthCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioMonitorIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const silenceCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastMessageTimeRef = useRef<number>(0);
   const lastAudioSentTimeRef = useRef<number>(0);
   const reconnectAttemptsRef = useRef<number>(0);
   const isReconnectingRef = useRef<boolean>(false);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isAutoResetRef = useRef<boolean>(false); // Flag for auto-reset vs error reconnect
-  
+  const sessionStartTimeRef = useRef<number>(0);
+
+  // Batch streaming transcript via requestAnimationFrame (Change B)
+  const streamingTextRef = useRef<string>('');
+  const pendingUpdateRef = useRef<boolean>(false);
+  const rafIdRef = useRef<number | null>(null);
+
+  // Pre-warm WebSocket connection (Change C)
+  const preWarmedWsRef = useRef<WebSocket | null>(null);
+
   // Refs for functions called from callbacks (avoids circular dependencies)
   const attemptReconnectRef = useRef<() => Promise<void>>(null!);
   const startHealthCheckRef = useRef<() => void>(null!);
@@ -97,7 +115,26 @@ export function useRealtimeTranscription(
   }, [notifyDebug]);
 
   // ---------------------------------------------------------------------
-  // Append transcript (final or streaming)
+  // Flush pending streaming update (used by Change B — rAF batching)
+  // ---------------------------------------------------------------------
+  const flushStreamingUpdate = useCallback(() => {
+    if (!pendingUpdateRef.current) return;
+    const streamingText = streamingTextRef.current;
+    setTranscriptMessages((prev) => {
+      if (currentMessageRef.current) {
+        return prev.map((msg) =>
+          msg.id === currentMessageRef.current?.id
+            ? { ...msg, text: streamingText }
+            : msg
+        );
+      }
+      return prev;
+    });
+    pendingUpdateRef.current = false;
+  }, []);
+
+  // ---------------------------------------------------------------------
+  // Append transcript (final or streaming, with rAF batching)
   // ---------------------------------------------------------------------
   const appendTranscript = useCallback((text: string, isFinal: boolean = true) => {
     const trimmed = text.trim();
@@ -110,6 +147,15 @@ export function useRealtimeTranscription(
     }
 
     if (isFinal) {
+      // Flush any pending streaming update before adding final message
+      if (pendingUpdateRef.current) {
+        if (rafIdRef.current !== null) {
+          cancelAnimationFrame(rafIdRef.current!);
+          rafIdRef.current = null;
+        }
+        flushStreamingUpdate();
+      }
+
       const newMessage: TranscriptMessage = {
         id: generateMessageId(),
         text: trimmed,
@@ -118,30 +164,31 @@ export function useRealtimeTranscription(
       setTranscriptMessages((prev) => [...prev, newMessage]);
       setTranscript((prev) => (prev ? `${prev} ${trimmed}` : trimmed));
       currentMessageRef.current = null;
+      streamingTextRef.current = '';
     } else {
-      // Update or create current streaming message
-      if (currentMessageRef.current) {
-        currentMessageRef.current = {
-          ...currentMessageRef.current,
-          text: trimmed,
-        };
-        setTranscriptMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === currentMessageRef.current?.id
-              ? { ...msg, text: trimmed }
-              : msg
-          )
-        );
-      } else {
+      // Streaming: batch updates via requestAnimationFrame
+      streamingTextRef.current = trimmed;
+
+      // Update or create current streaming message ref
+      if (!currentMessageRef.current) {
         currentMessageRef.current = {
           id: `streaming-${Date.now()}`,
           text: trimmed,
           timestamp: new Date(),
         };
+        // Add placeholder immediately so the list renders the new entry
         setTranscriptMessages((prev) => [...prev, currentMessageRef.current!]);
       }
+
+      // Schedule a rAF flush if one isn't already pending
+      if (!pendingUpdateRef.current) {
+        pendingUpdateRef.current = true;
+        rafIdRef.current = requestAnimationFrame(() => {
+          flushStreamingUpdate();
+        });
+      }
     }
-  }, []);
+  }, [flushStreamingUpdate]);
 
   // ---------------------------------------------------------------------
   // Parse realtime WebSocket messages
@@ -236,6 +283,10 @@ export function useRealtimeTranscription(
       clearTimeout(autoResetTimeoutRef.current);
       autoResetTimeoutRef.current = null;
     }
+    if (silenceCheckIntervalRef.current) {
+      clearInterval(silenceCheckIntervalRef.current);
+      silenceCheckIntervalRef.current = null;
+    }
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -267,6 +318,14 @@ export function useRealtimeTranscription(
     isReconnectingRef.current = false;
     isAutoResetRef.current = false;
 
+    // Cancel any pending rAF for streaming updates
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    pendingUpdateRef.current = false;
+    streamingTextRef.current = '';
+
     // Clear intervals and timeouts
     clearTimers();
 
@@ -297,6 +356,12 @@ export function useRealtimeTranscription(
     if (processorRef.current) {
       processorRef.current.disconnect();
       processorRef.current = null;
+    }
+
+    if (workletNodeRef.current) {
+      workletNodeRef.current.port.onmessage = null;
+      workletNodeRef.current.disconnect();
+      workletNodeRef.current = null;
     }
 
     if (audioContextRef.current) {
@@ -395,51 +460,124 @@ export function useRealtimeTranscription(
   }, []);
 
   // ---------------------------------------------------------------------
-  // Schedule auto-reset to release server GPU memory
+  // Schedule auto-reset with silence-gating (Change A)
+  // Only auto-reset during detected silence, with a safety valve for
+  // max session duration.
   // ---------------------------------------------------------------------
   const scheduleAutoReset = useCallback(() => {
-    // Clear any existing timeout
+    // Clear any existing timers
     if (autoResetTimeoutRef.current) {
       clearTimeout(autoResetTimeoutRef.current);
+      autoResetTimeoutRef.current = null;
+    }
+    if (silenceCheckIntervalRef.current) {
+      clearInterval(silenceCheckIntervalRef.current);
+      silenceCheckIntervalRef.current = null;
     }
 
+    // Record session start time
+    sessionStartTimeRef.current = Date.now();
+
+    // Safety valve: force a reset after maxSessionMs even during speech
     autoResetTimeoutRef.current = setTimeout(() => {
       if (!isReconnectingRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+        console.log('[RealtimeTranscription] Auto-reset: max session time reached (safety valve)');
         // Commit and clear any pending audio buffer
-        if (wsRef.current) {
-          try {
-            wsRef.current.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-            wsRef.current.send(JSON.stringify({ type: 'input_audio_buffer.clear' }));
-          } catch {
-            // Ignore errors
-          }
-        }
+        try {
+          wsRef.current.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+          wsRef.current.send(JSON.stringify({ type: 'input_audio_buffer.clear' }));
+        } catch { /* Ignore errors */ }
         
         // Close WebSocket but preserve MediaStream
-        if (wsRef.current) {
-          wsRef.current.close();
-          wsRef.current = null;
-        }
-        
+        wsRef.current.close();
+        wsRef.current = null;
+
         // Clean up audio processing but preserve MediaStream
         if (processorRef.current) {
           processorRef.current.disconnect();
           processorRef.current = null;
         }
+        if (workletNodeRef.current) {
+          workletNodeRef.current.port.onmessage = null;
+          workletNodeRef.current.disconnect();
+          workletNodeRef.current = null;
+        }
         if (audioContextRef.current) {
           audioContextRef.current.close();
           audioContextRef.current = null;
         }
-        
-        // Set flag to indicate this is an auto-reset (not an error)
+
         isAutoResetRef.current = true;
         isReconnectingRef.current = true;
         reconnectAttemptsRef.current = 0;
-        
-        // Trigger reconnect
         attemptReconnectRef.current();
       }
-    }, WEBSOCKET_CONFIG.autoResetInterval);
+    }, SILENCE_RESET.maxSessionMs);
+
+    // Periodic silence check: reset when silence ≥ minSilenceMs
+    silenceCheckIntervalRef.current = setInterval(() => {
+      if (isReconnectingRef.current) return;
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+      const now = Date.now();
+      const sessionMs = now - sessionStartTimeRef.current;
+
+      // Use audio send activity (lastAudioSentTimeRef) instead of server messages
+      // (lastMessageTimeRef). The server only sends messages when it has a
+      // transcript to return, so "no server message" ≠ silence. If we're
+      // actively sending audio, we should NOT reset.
+      const audioSilenceMs = now - (lastAudioSentTimeRef.current || sessionStartTimeRef.current);
+
+      // Don't consider reset if:
+      // 1. We're still sending audio (audioSilenceMs < minSilenceMs means
+      //    audio chunks are flowing, so we're not truly silent)
+      // 2. The session just started (need a grace period for the server to
+      //    respond — at least one minSilenceMs cycle after connect)
+      if (audioSilenceMs < SILENCE_RESET.minSilenceMs) return;
+      if (sessionMs < SILENCE_RESET.minSilenceMs * 2) return;
+
+      const messageSilenceMs = now - lastMessageTimeRef.current;
+      console.log(`[RealtimeTranscription] Auto-reset: audio silence detected (${audioSilenceMs}ms), no server messages for ${messageSilenceMs}ms, session duration ${sessionMs}ms`);
+      // Commit and clear any pending audio buffer
+      try {
+        wsRef.current!.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+        wsRef.current!.send(JSON.stringify({ type: 'input_audio_buffer.clear' }));
+      } catch { /* Ignore errors */ }
+      
+      // Close WebSocket but preserve MediaStream
+      wsRef.current!.close();
+      wsRef.current = null;
+
+      // Clean up audio processing but preserve MediaStream
+      if (processorRef.current) {
+        processorRef.current.disconnect();
+        processorRef.current = null;
+      }
+      if (workletNodeRef.current) {
+        workletNodeRef.current.port.onmessage = null;
+        workletNodeRef.current.disconnect();
+        workletNodeRef.current = null;
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+
+      // Clear timers (including this interval and the safety valve)
+      if (autoResetTimeoutRef.current) {
+        clearTimeout(autoResetTimeoutRef.current);
+        autoResetTimeoutRef.current = null;
+      }
+      if (silenceCheckIntervalRef.current) {
+        clearInterval(silenceCheckIntervalRef.current);
+        silenceCheckIntervalRef.current = null;
+      }
+
+      isAutoResetRef.current = true;
+      isReconnectingRef.current = true;
+      reconnectAttemptsRef.current = 0;
+      attemptReconnectRef.current();
+    }, 5000); // Check every 5 seconds
   }, []);
 
   // ---------------------------------------------------------------------
@@ -498,12 +636,75 @@ export function useRealtimeTranscription(
 
     const audioContext = new AudioContext({ sampleRate: REALTIME_AUDIO.sampleRate });
     const source = audioContext.createMediaStreamSource(stream);
+
+    // ----------------------------------------------------------------
+    // Audio capture: try AudioWorklet first, fall back to ScriptProcessorNode
+    // ----------------------------------------------------------------
+    const useWorklet = typeof audioContext.audioWorklet !== 'undefined';
+
+    const sendPcm16 = (pcm16: Int16Array) => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+      const base64 = int16ToBase64(pcm16);
+      wsRef.current.send(
+        JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 }),
+      );
+    };
+
+    if (useWorklet) {
+      // --- AudioWorklet path (low latency, off-main-thread) ---
+      try {
+        await audioContext.audioWorklet.addModule(AUDIO_WORKLET_URL);
+        const workletNode = new AudioWorkletNode(audioContext, 'audio-processor');
+
+        workletNode.port.onmessage = (event: MessageEvent) => {
+          // Track that we're receiving audio events
+          lastAudioSentTimeRef.current = Date.now();
+
+          if (event.data?.type === 'audio-data' && event.data.pcm16) {
+            // Worklet already converts to Int16 at the native sample rate.
+            // If AudioContext.sampleRate differs from target, downsample here.
+            let pcm16: Int16Array = event.data.pcm16;
+            if (audioContext.sampleRate !== REALTIME_AUDIO.sampleRate) {
+              // Downsample: Int16 → Float32 → downsample → Float32 → Int16
+              const float32 = new Float32Array(pcm16.length);
+              for (let i = 0; i < pcm16.length; i++) {
+                float32[i] = pcm16[i] / (pcm16[i] < 0 ? 0x8000 : 0x7fff);
+              }
+              const resampled = downsampleBuffer(float32, audioContext.sampleRate, REALTIME_AUDIO.sampleRate);
+              pcm16 = floatTo16BitPCM(resampled);
+            }
+            sendPcm16(pcm16);
+          }
+        };
+
+        source.connect(workletNode);
+        workletNode.connect(audioContext.destination);
+
+        audioContextRef.current = audioContext;
+        processorRef.current = workletNode;
+        workletNodeRef.current = workletNode;
+        setIsRealtime(true);
+
+        console.log('[RealtimeTranscription] Using AudioWorklet for audio capture');
+        return; // Successfully set up worklet — done
+      } catch (err) {
+        console.warn('[RealtimeTranscription] AudioWorklet setup failed, falling back to ScriptProcessorNode:', err);
+        // Clean up any partial worklet state before falling through
+        if (workletNodeRef.current) {
+          workletNodeRef.current.port.onmessage = null;
+          workletNodeRef.current.disconnect();
+          workletNodeRef.current = null;
+        }
+      }
+    }
+
+    // --- ScriptProcessorNode fallback (deprecated, main-thread) ---
     const processor = audioContext.createScriptProcessor(REALTIME_AUDIO.processorBufferSize, 1, 1);
 
     processor.onaudioprocess = (event) => {
       // Track that we're receiving audio events
       lastAudioSentTimeRef.current = Date.now();
-      
+
       // Check AudioContext state
       if (!ensureAudioContextRunning()) {
         return;
@@ -515,10 +716,7 @@ export function useRealtimeTranscription(
       const inputData = event.inputBuffer.getChannelData(0);
       const resampled = downsampleBuffer(inputData, audioContext.sampleRate, REALTIME_AUDIO.sampleRate);
       const pcm16 = floatTo16BitPCM(resampled);
-      const base64 = int16ToBase64(pcm16);
-      wsRef.current.send(
-        JSON.stringify({ type: 'input_audio_buffer.append', audio: base64 })
-      );
+      sendPcm16(pcm16);
     };
 
     source.connect(processor);
@@ -527,6 +725,8 @@ export function useRealtimeTranscription(
     audioContextRef.current = audioContext;
     processorRef.current = processor;
     setIsRealtime(true);
+
+    console.log('[RealtimeTranscription] Using ScriptProcessorNode fallback for audio capture');
   }, [baseUrl, model, language, intent, parseRealtimeMessage, sendSessionUpdate, startKeepalive, ensureAudioContextRunning]);
 
   // ---------------------------------------------------------------------
@@ -700,6 +900,53 @@ export function useRealtimeTranscription(
   }, [useVAD]);
 
   // ---------------------------------------------------------------------
+  // Pre-warm WebSocket connection (Change C)
+  // Opens a WebSocket and sends session.update so the connection is
+  // ready when the user clicks start. Does NOT start audio capture.
+  // ---------------------------------------------------------------------
+  const warmConnection = useCallback(() => {
+    // Skip if we already have a pre-warmed connection that's open or opening
+    if (
+      preWarmedWsRef.current &&
+      (preWarmedWsRef.current.readyState === WebSocket.OPEN ||
+        preWarmedWsRef.current.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+
+    // Clean up any closed/closing leftover before creating a fresh one
+    if (preWarmedWsRef.current) {
+      preWarmedWsRef.current = null;
+    }
+
+    const wsUrl = buildRealtimeUrl(baseUrl, model, language, intent);
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      sendSessionUpdate(ws, language);
+    };
+
+    ws.onmessage = () => {
+      // Discard any messages received during pre-warm
+    };
+
+    ws.onerror = () => {
+      // Silently discard — startTranscription will create a fresh one
+      if (preWarmedWsRef.current === ws) {
+        preWarmedWsRef.current = null;
+      }
+    };
+
+    ws.onclose = () => {
+      if (preWarmedWsRef.current === ws) {
+        preWarmedWsRef.current = null;
+      }
+    };
+
+    preWarmedWsRef.current = ws;
+  }, [baseUrl, model, language, intent, sendSessionUpdate]);
+
+  // ---------------------------------------------------------------------
   // Start transcription
   // ---------------------------------------------------------------------
   const startTranscription = useCallback(async () => {
@@ -717,9 +964,51 @@ export function useRealtimeTranscription(
       if (!useExternalAudio) {
         await setupRealtimeTranscription();
       } else {
-        // For external audio, just set up the WebSocket connection
-        const wsUrl = buildRealtimeUrl(baseUrl, model, language, intent);
-        const ws = new WebSocket(wsUrl);
+        // For external audio, set up WebSocket — reuse pre-warmed connection if available
+        let ws: WebSocket;
+
+        if (preWarmedWsRef.current) {
+          const preWarmed = preWarmedWsRef.current;
+          preWarmedWsRef.current = null;
+
+          if (preWarmed.readyState === WebSocket.OPEN) {
+            // Reuse pre-warmed connection — re-send session.update in case
+            // the language or model changed since the connection was warmed
+            ws = preWarmed;
+            sendSessionUpdate(ws, language);
+          } else if (preWarmed.readyState === WebSocket.CONNECTING) {
+            // Wait for the in-flight pre-warm to finish (or fail)
+            await new Promise<void>((resolve, reject) => {
+              preWarmed.onopen = () => resolve();
+              preWarmed.onclose = () => reject(new Error('Realtime WebSocket closed'));
+              preWarmed.onerror = () => reject(new Error('Realtime WebSocket error'));
+            });
+            ws = preWarmed;
+            sendSessionUpdate(ws, language);
+          } else {
+            // CLOSING/CLOSED — clean up and fall through to a fresh connection
+            if (preWarmed.readyState === WebSocket.CLOSING) {
+              preWarmed.close();
+            }
+            ws = new WebSocket(buildRealtimeUrl(baseUrl, model, language, intent));
+            await new Promise<void>((resolve, reject) => {
+              ws.onopen = () => resolve();
+              ws.onclose = () => reject(new Error('Realtime WebSocket closed'));
+              ws.onerror = () => reject(new Error('Realtime WebSocket error'));
+            });
+            sendSessionUpdate(ws, language);
+          }
+        } else {
+          ws = new WebSocket(buildRealtimeUrl(baseUrl, model, language, intent));
+
+          await new Promise<void>((resolve, reject) => {
+            ws.onopen = () => resolve();
+            ws.onclose = () => reject(new Error('Realtime WebSocket closed'));
+            ws.onerror = () => reject(new Error('Realtime WebSocket error'));
+          });
+
+          sendSessionUpdate(ws, language);
+        }
 
         wsRef.current = ws;
 
@@ -741,15 +1030,6 @@ export function useRealtimeTranscription(
           console.log('[RealtimeTranscription] WebSocket closed:', event.code, event.reason);
         };
 
-        await new Promise<void>((resolve, reject) => {
-          ws.onopen = () => {
-            resolve();
-          };
-          ws.onclose = () => reject(new Error('Realtime WebSocket closed'));
-          ws.onerror = () => reject(new Error('Realtime WebSocket error'));
-        });
-
-        sendSessionUpdate(ws, language);
         startKeepalive();
         setIsRealtime(true);
 
@@ -808,12 +1088,24 @@ export function useRealtimeTranscription(
     setTranscript('');
     setTranscriptMessages([]);
     currentMessageRef.current = null;
+    streamingTextRef.current = '';
+    pendingUpdateRef.current = false;
   }, []);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopTranscription();
+      // Clean up pre-warmed connection if it was never used
+      if (preWarmedWsRef.current) {
+        preWarmedWsRef.current.close();
+        preWarmedWsRef.current = null;
+      }
+      // Cancel pending rAF
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
     };
   }, [stopTranscription]);
 
@@ -826,5 +1118,6 @@ export function useRealtimeTranscription(
     stopTranscription,
     sendAudioData,
     clearTranscript,
+    warmConnection,
   };
 }

@@ -1,7 +1,7 @@
 // Output panel component - translation and summary views
 // Refactored to use Zustand stores
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { TranslationMessage } from '@/hooks/useTranslation';
@@ -24,7 +24,7 @@ function scrollToBottom(element: HTMLElement): void {
   element.scrollTop = element.scrollHeight;
 }
 
-export function OutputPanel({
+export const OutputPanel = memo(function OutputPanel({
   translationMessages,
   summary,
   isSummarizing,
@@ -183,4 +183,4 @@ export function OutputPanel({
       </div>
     </div>
   );
-}
+});

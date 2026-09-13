@@ -270,6 +270,32 @@ describe('int16ToBase64', () => {
       expect(typeof result).toBe('string')
       expect(result.length).toBeGreaterThan(0)
     })
+
+    it('should encode non-zero byteOffset subarrays correctly', () => {
+      // Regression test: the encoder must respect byteOffset/byteLength
+      // when the Int16Array is a view into a larger buffer
+      const backing = new Int16Array([111, 222, 333, 444, 555, 666])
+      const view = backing.subarray(2, 5) // elements [333, 444, 555], byteOffset = 4
+
+      expect(view.byteOffset).toBe(4)
+      expect(view.byteLength).toBe(6)
+
+      const full = int16ToBase64(backing)
+      const partial = int16ToBase64(view)
+
+      expect(partial).not.toBe(full)
+
+      // Decoding the partial encoding must yield exactly the viewed elements
+      const decoded = atob(partial)
+      const bytes = new Uint8Array(decoded.length)
+      for (let i = 0; i < decoded.length; i++) {
+        bytes[i] = decoded.charCodeAt(i)
+      }
+      expect(bytes.length).toBe(view.byteLength)
+
+      const reconstructed = new Int16Array(bytes.buffer)
+      expect(Array.from(reconstructed)).toEqual([333, 444, 555])
+    })
   })
 
   describe('boundary values', () => {
