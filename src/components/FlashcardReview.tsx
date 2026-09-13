@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { Flashcard, VocabularyItem } from '@/types/vocabulary';
+import type { ReviewSession } from '@/types/gamification';
 import { calculateNextReview, type Rating } from '@/lib/srs';
 import { getVocabularyDB } from '@/lib/vocabulary-db';
 import { getLearningProfileService } from '@/lib/learning-profile-service';
@@ -29,6 +30,7 @@ export function FlashcardReview({ deck, items, language = 'en' }: FlashcardRevie
   const [sessionStats, setSessionStats] = useState({ reviewed: 0, again: 0, hard: 0, good: 0, easy: 0 });
   const [showSummary, setShowSummary] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
+  const [completedSession, setCompletedSession] = useState<ReviewSession | null>(null);
   const [levelUpInfo, setLevelUpInfo] = useState<{ level: number; levelName: string } | null>(null);
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
 
@@ -74,7 +76,7 @@ export function FlashcardReview({ deck, items, language = 'en' }: FlashcardRevie
     try {
       const db = await getVocabularyDB();
       const dueCards = await db.getDueCardsForDeck(deck.id);
-      
+
       // Attach vocabulary items to cards
       const itemMap = new Map(items.map(item => [item.id, item]));
       const cardsWithItems = dueCards.map(card => ({
@@ -83,24 +85,25 @@ export function FlashcardReview({ deck, items, language = 'en' }: FlashcardRevie
       }));
 
       setCards(cardsWithItems);
+
+      // Start a gamification session before cards render so ratings are
+      // always recorded against an active session. Previously this ran in a
+      // fire-and-forget effect, racing the first rating (and producing
+      // nondeterministic summaries).
+      if (cardsWithItems.length > 0 && !currentSession && !gamificationLoading) {
+        await startReviewSession(deck.id);
+        setSessionStartTime(new Date());
+      }
     } catch (error) {
       console.error('Failed to load due cards:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [deck, items]);
+  }, [deck, items, currentSession, gamificationLoading, startReviewSession]);
 
   useEffect(() => {
     loadDueCards();
   }, [loadDueCards]);
-
-  // Start gamification session when cards are loaded
-  useEffect(() => {
-    if (cards.length > 0 && deck && !currentSession && !gamificationLoading) {
-      startReviewSession(deck.id);
-      setSessionStartTime(new Date());
-    }
-  }, [cards, deck, currentSession, gamificationLoading, startReviewSession]);
 
   const handleFlip = () => {
     setIsFlipped(!isFlipped);
@@ -167,6 +170,8 @@ export function FlashcardReview({ deck, items, language = 'en' }: FlashcardRevie
         setIsFlipped(false);
       } else {
         // End session and check achievements
+        // Snapshot the session first — endReviewSession nulls currentSession
+        setCompletedSession(currentSession);
         await endReviewSession();
         await checkAchievements();
         
@@ -211,6 +216,7 @@ export function FlashcardReview({ deck, items, language = 'en' }: FlashcardRevie
     setSessionStats({ reviewed: 0, again: 0, hard: 0, good: 0, easy: 0 });
     setShowSummary(false);
     setSessionEnded(false);
+    setCompletedSession(null);
     await loadDueCards();
   };
 
@@ -255,10 +261,13 @@ export function FlashcardReview({ deck, items, language = 'en' }: FlashcardRevie
   }
 
   // Show ReviewSummary modal when session ends
-  if (showSummary && currentSession) {
+  // Note: `endReviewSession` nulls `currentSession`, so we snapshot the
+  // session before ending it — otherwise whether the user sees the
+  // ReviewSummary or the fallback depends on async state-update timing.
+  if (showSummary && completedSession) {
     return (
       <ReviewSummary
-        session={currentSession}
+        session={completedSession}
         onClose={handleRestart}
       />
     );

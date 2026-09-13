@@ -420,9 +420,11 @@ describe('FlashcardReview', () => {
       });
       fireEvent.click(screen.getByText('Again'));
 
-      // Should show summary
+      // Should show ReviewSummary (deterministic now that the gamification
+      // session is started before cards render)
       await waitFor(() => {
-        expect(screen.getByText('Session Complete!')).toBeDefined();
+        expect(screen.getByText('Session Complete! 🎉')).toBeDefined();
+        expect(screen.getByText('Continue')).toBeDefined();
       });
     });
 
@@ -453,8 +455,10 @@ describe('FlashcardReview', () => {
       });
       fireEvent.click(screen.getByText('Good'));
 
+      // ReviewSummary shows the gamification session's card count
       await waitFor(() => {
-        expect(screen.getByText('You reviewed 2 cards.')).toBeDefined();
+        expect(screen.getByText('Session Complete! 🎉')).toBeDefined();
+        expect(screen.getByText('Cards Reviewed')).toBeDefined();
       });
     });
 
@@ -485,9 +489,9 @@ describe('FlashcardReview', () => {
       });
       fireEvent.click(screen.getByText('Good'));
 
-      // Should show session complete (ReviewSummary when session data exists)
+      // Should show session complete (ReviewSummary with session data)
       await waitFor(() => {
-        expect(screen.getByText('Session Complete!')).toBeDefined();
+        expect(screen.getByText('Session Complete! 🎉')).toBeDefined();
       });
 
       // Click "Continue" to restart (ReviewSummary component)
