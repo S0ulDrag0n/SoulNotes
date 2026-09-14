@@ -49,6 +49,7 @@ test-tauri-backend.js
 # Tauri config and test files
 src-tauri/config*.yml
 config.local.yml
+config.yml
 src-tauri/src/test_translate.rs
 next-env.d.ts
 tsconfig.tsbuildinfo
