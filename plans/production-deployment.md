@@ -116,13 +116,13 @@ SoulNotes resolves configuration in the following order (highest to lowest prior
 ### Example Production Setup
 
 ```
-Production Server: 10.61.46.95
-├── Ollama Service    → http://10.61.46.95:10102
-└── Speaches Service  → http://10.61.46.95:10300
+Production Server: your-server.example
+├── Ollama Service    → http://your-server.example:10102
+└── Speaches Service  → http://your-server.example:10300
 
 Client Configuration (.env.local or config.local.yml):
-├── OLLAMA_BASE_URL=http://10.61.46.95:10102
-└── SPEACHES_BASE_URL=http://10.61.46.95:10300
+├── OLLAMA_BASE_URL=http://your-server.example:10102
+└── SPEACHES_BASE_URL=http://your-server.example:10300
 ```
 
 ## Testing Production Configuration

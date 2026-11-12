@@ -1,5 +1,5 @@
 import { DEFAULT_SUMMARIZE_PROMPT } from '@/lib/constants';
-import { LLMClient, buildLLMConfig } from '@/lib/llm-client';
+import { LLMClient, buildLLMConfig, ModelNotFoundError } from '@/lib/llm-client';
 import { loadConfig } from '@/lib/load-config';
 
 type SummarizeRequest = {
@@ -17,6 +17,9 @@ export async function POST(req: Request) {
   const rawConfig = loadConfig();
   const llmConfig = buildLLMConfig(rawConfig);
   const llm = new LLMClient(llmConfig);
+  if (llmConfig.provider === 'ollama') {
+    await llm.assertModelAvailable(llmConfig.summarizeModel as string);
+  }
   
   // Use configured prompt or default
   const promptTemplate = rawConfig.summarize_prompt ?? DEFAULT_SUMMARIZE_PROMPT;
@@ -28,6 +31,9 @@ export async function POST(req: Request) {
       headers: { 'Content-Type': 'text/plain' }
     });
   } catch (err) {
+    if (err instanceof ModelNotFoundError) {
+      return new Response(err.message, { status: err.statusCode });
+    }
     return new Response('Summarization failed', { status: 500 });
   }
 }

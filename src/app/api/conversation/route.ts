@@ -10,7 +10,7 @@ import {
   type LearningProfile,
 } from '@/types/conversation';
 import { LANGUAGE_LABELS } from '@/lib/constants';
-import { LLMClient, buildLLMConfig } from '@/lib/llm-client';
+import { LLMClient, buildLLMConfig, ModelNotFoundError } from '@/lib/llm-client';
 import { loadConfig } from '@/lib/load-config';
 
 interface ConversationRequest {
@@ -33,6 +33,9 @@ export async function POST(request: NextRequest) {
     const rawConfig = loadConfig();
     const llmConfig = buildLLMConfig(rawConfig);
     const llm = new LLMClient(llmConfig);
+    if (llmConfig.provider === 'ollama') {
+      await llm.assertModelAvailable(llmConfig.conversationModel as string);
+    }
 
     // Build system prompt
     const systemPrompt = buildSystemPrompt(language, scenario, difficulty, learningProfile);
@@ -54,7 +57,10 @@ export async function POST(request: NextRequest) {
       vocabulary,
     });
   } catch (error) {
-    console.error('Conversation API error:', error);
+    if (error instanceof ModelNotFoundError) {
+      return new Response(error.message, { status: error.statusCode });
+    }
+        console.error('Conversation API error:', error);
     return NextResponse.json(
       { error: 'Failed to generate response' },
       { status: 500 }

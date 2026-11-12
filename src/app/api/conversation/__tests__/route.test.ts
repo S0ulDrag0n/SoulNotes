@@ -7,12 +7,18 @@ const mockConverse = vi.fn();
 vi.mock('@/lib/llm-client', () => ({
   LLMClient: vi.fn().mockImplementation(function(this: any, _config: any) {
     this.converse = mockConverse;
+    this.assertModelAvailable = vi.fn().mockResolvedValue(undefined);
   }),
   buildLLMConfig: vi.fn(() => ({
     provider: 'ollama',
     ollamaBaseUrl: 'http://localhost:11434',
     ollamaConversationModel: DEFAULT_OLLAMA_CONFIG.conversationModel,
   })),
+  // stub so the route's instanceof check works; tests throw plain Errors
+  ModelNotFoundError: class ModelNotFoundError extends Error {
+    statusCode = 503;
+    name = 'ModelNotFoundError';
+  },
 }));
 
 // Mock fs module for config loading

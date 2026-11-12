@@ -1,6 +1,6 @@
 // src/app/api/meeting-report/route.ts
 
-import { LLMClient, buildLLMConfig } from '@/lib/llm-client';
+import { LLMClient, buildLLMConfig, ModelNotFoundError } from '@/lib/llm-client';
 import { loadConfig } from '@/lib/load-config';
 import { NextResponse } from 'next/server';
 
@@ -173,7 +173,10 @@ Respond in JSON format:
       summary: generateSummary(translation || transcript),
     });
   } catch (error) {
-    console.error('Meeting report error:', error);
+    if (error instanceof ModelNotFoundError) {
+      return new Response(error.message, { status: error.statusCode });
+    }
+        console.error('Meeting report error:', error);
     return NextResponse.json(
       { error: 'Failed to generate meeting report' },
       { status: 500 }

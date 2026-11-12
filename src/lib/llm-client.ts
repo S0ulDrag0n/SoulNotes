@@ -67,6 +67,7 @@ export interface LLMStreamChunk {
  */
 class OllamaLLMClient {
   private client: Ollama;
+  private tagsCache: { at: number; names: Set<string> } | null = null;
 
   constructor(baseUrl: string, apiToken?: string) {
     const headers: Record<string, string> = {};
@@ -74,6 +75,22 @@ class OllamaLLMClient {
       headers['Authorization'] = `Bearer ${apiToken}`;
     }
     this.client = new Ollama({ host: baseUrl, headers });
+  }
+
+  /** Model names currently known to the server (cached for 60s). */
+  private async availableModels(): Promise<Set<string>> {
+    if (this.tagsCache && Date.now() - this.tagsCache.at < 60_000) {
+      return this.tagsCache.names;
+    }
+    const list = await this.client.list();
+    const names = new Set(list.models.map((m) => m.name));
+    this.tagsCache = { at: Date.now(), names };
+    return names;
+  }
+
+  /** Throws ModelNotFoundError when the model is missing on the server. */
+  async assertModelAvailable(model: string): Promise<void> {
+    assertModelAvailable(model, await this.availableModels());
   }
 
   async chat(
@@ -265,6 +282,39 @@ class OpenAICompatibleLLMClient {
 // Unified LLM Client
 // ---------------------------------------------------------------------------
 
+/**
+ * A configured model is not available on the target server. Fail fast:
+ * ollama would otherwise attempt a pull on first use and the request
+ * silently hangs for minutes.
+ */
+export class ModelNotFoundError extends Error {
+  /** HTTP-style status the API routes should surface this as. */
+  statusCode = 503;
+  constructor(message: string) {
+    super(message);
+    this.name = 'ModelNotFoundError';
+  }
+}
+
+/**
+ * Pure check: throws ModelNotFoundError when `model` is not in `available`.
+ * Listed names can appear either bare (`deepseek-v4.1-flash:cloud`) or
+ * with an owner prefix (`unsloth/qwen3.8:q4`), so both spellings match.
+ */
+export function assertModelAvailable(model: string, available: Iterable<string>): void {
+  const names = new Set(available);
+  if (names.has(model)) return;
+  const short = model.includes('/') ? model.split('/').pop()! : model;
+  const bare = new Set(Array.from(names, (n) => (n.includes('/') ? n.split('/').pop()! : n)));
+  if (bare.has(short)) return;
+  const list = Array.from(names).map((n) => `"${n}"`).join(', ') || '(none)';
+  throw new ModelNotFoundError(
+    `Model "${model}" is not available on the configured server. ` +
+      `Either pull it (ollama pull ${model}) or point the setting at an existing model. ` +
+      `Available: ${list}`
+  );
+}
+
 export class LLMClient {
   private ollamaClient: OllamaLLMClient | null = null;
   private openaiCompatibleClient: OpenAICompatibleLLMClient | null = null;
@@ -295,6 +345,16 @@ export class LLMClient {
   }
 
   /**
+   * Fail fast when a model is not available on the server (before a
+   * streaming response is created, whose errors cannot reach the client
+   * as a status code).
+   */
+  async assertModelAvailable(model: string): Promise<void> {
+    if (this.config.provider !== 'ollama') return;
+    await this.getOllamaClient().assertModelAvailable(model);
+  }
+
+  /**
    * Send a chat request and get a complete response
    */
   async chat(
@@ -304,6 +364,7 @@ export class LLMClient {
   ): Promise<LLMResponse> {
     switch (this.config.provider) {
       case 'ollama':
+        await this.getOllamaClient().assertModelAvailable(model);
         return this.getOllamaClient().chat(model, messages, options);
       case 'openai-compatible':
         return this.getOpenAICompatibleClient().chat(model, messages, options);
@@ -322,6 +383,7 @@ export class LLMClient {
   ): AsyncGenerator<LLMStreamChunk> {
     switch (this.config.provider) {
       case 'ollama':
+        await this.getOllamaClient().assertModelAvailable(model);
         yield* this.getOllamaClient().chatStream(model, messages, options);
         break;
       case 'openai-compatible':

@@ -24,7 +24,7 @@ and wrapped as a Windows desktop app via Tauri (`src-tauri/`).
   transcription therefore does not work in deployment until Speaches STT is
   fixed or the STT backend is swapped (see TASKS.md).
 - **Ollama** for LLM work (translate/summarize/conversation). On Sarva, the
-  native ollama is `10.61.46.95:10102` (models: aya-expanse, llava,
+  native ollama is `<your-ollama-host>:10102 (LAN deployment)` (models: aya-expanse, llava,
   minicpm-v locally; deepseek-v4.1-flash:cloud, glm-5.3-flash:cloud,
   glm-5.3:cloud, kimi-k3.1-pro:cloud via ollama.com). The llama-swap proxy on
   `:10101` serves a different 19-model list (Qwen3.x, Gemma4, Kat-Coder…) —

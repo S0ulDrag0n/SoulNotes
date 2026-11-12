@@ -2,7 +2,7 @@ import {
   DEFAULT_TRANSLATE_PROMPT,
   LANGUAGE_LABELS,
 } from '@/lib/constants';
-import { LLMClient, buildLLMConfig } from '@/lib/llm-client';
+import { LLMClient, buildLLMConfig, ModelNotFoundError } from '@/lib/llm-client';
 import { loadConfig } from '@/lib/load-config';
 
 type TranslateRequest = {
@@ -24,7 +24,9 @@ export async function POST(req: Request) {
   const rawConfig = loadConfig();
   const llmConfig = buildLLMConfig(rawConfig);
   const llm = new LLMClient(llmConfig);
-  
+
+  // Pre-flight before the stream exists so a bad model pin returns a clean
+  // 503 instead of an ollama pull-hang or a dropped connection.
   const sourceLabel = LANGUAGE_LABELS[sourceLanguage ?? ''] ?? sourceLanguage ?? 'English';
   const targetLabel = LANGUAGE_LABELS[targetLanguage ?? ''] ?? targetLanguage ?? 'English';
   
@@ -43,6 +45,9 @@ export async function POST(req: Request) {
   }
 
   try {
+    if (llmConfig.provider === 'ollama') {
+      await llm.assertModelAvailable(llmConfig.translateModel as string);
+    }
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -64,6 +69,9 @@ export async function POST(req: Request) {
       headers: { 'Content-Type': 'text/plain; charset=utf-8' }
     });
   } catch (err) {
+    if (err instanceof ModelNotFoundError) {
+      return new Response(err.message, { status: err.statusCode });
+    }
     return new Response('Translation failed', { status: 500 });
   }
 }
