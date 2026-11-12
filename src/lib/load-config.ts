@@ -102,6 +102,31 @@ export function loadConfig(): RawAppConfig {
         }
 
         console.log(`Loaded config from: ${configPath}`);
+
+        // config.local.yml (gitignored) overrides the committed config for this machine
+        const localPath = join(process.cwd(), 'config.local.yml');
+        if (existsSync(localPath) && configPath !== localPath) {
+          const localContent = readFileSync(localPath, 'utf-8');
+          for (const line of localContent.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const colonIndex = trimmed.indexOf(':');
+            if (colonIndex === -1) continue;
+            const key = trimmed.slice(0, colonIndex).trim();
+            if (key === 'translate_prompt' || key === 'summarize_prompt') continue;
+            const mappedKey = KNOWN_CONFIG_KEYS[key];
+            let value = trimmed.slice(colonIndex + 1).trim();
+            if ((value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+              value = value.slice(1, -1);
+            }
+            if (value === 'null' || value === '~') continue;
+            if (mappedKey) {
+              config[mappedKey] = value;
+            }
+          }
+          console.log(`Merged local overrides from: ${localPath}`);
+        }
         return config;
       } catch (error) {
         console.error(`Error loading config from ${configPath}:`, error);
