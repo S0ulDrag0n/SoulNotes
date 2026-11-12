@@ -17,10 +17,12 @@ and wrapped as a Windows desktop app via Tauri (`src-tauri/`).
 - **Tauri** (Rust) for the desktop shell — Rust toolchain is NOT available in
   the Hermes sandbox; web-side work only, `next build` + `vitest` are the
   local gates
-- **Speaches** (faster-whisper) for STT — `speaches_base_url` in config; the
-  deployment currently points at Sarva `:10300`, whose STT endpoints are
-  broken as of Oct 2026 (TTS/Kokoro works). Live transcription accordingly
-  does not work until Speaches STT is fixed or the backend is swapped.
+- **Transcription**: a low-latency WebSocket pipeline landed Sep 2026 (24kHz
+  wire format, pre-warm, silence-reset cleanup). It fronts the Speaches STT
+  server (`speaches_base_url`) — on Sarva `:10300`, whose STT endpoints have
+  returned 500s since early Oct 2026 while TTS/Kokoro works. Live
+  transcription therefore does not work in deployment until Speaches STT is
+  fixed or the STT backend is swapped (see TASKS.md).
 - **Ollama** for LLM work (translate/summarize/conversation). On Sarva, the
   native ollama is `10.61.46.95:10102` (models: aya-expanse, llava,
   minicpm-v locally; deepseek-v4.1-flash:cloud, glm-5.3-flash:cloud,

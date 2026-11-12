@@ -68,4 +68,3 @@ src-wasm/public_key.bin
 src-tauri/public_key.bin
 src-wasm/public_key.bin
 
-config.yml

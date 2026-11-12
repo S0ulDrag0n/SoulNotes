@@ -16,11 +16,12 @@ smoke). Everything here was verified by touching the code — items marked
 
 ## Enhancements (high value first)
 
-- [ ] **STT abstraction seam**: isolate transcription behind an interface so a whisper.cpp/local-GPU backend can run beside Speaches — this also unlocks automated audio e2e (feed files instead of mic).
+- [ ] **STT backend for the WS pipeline**: the low-latency WebSocket transcription (Sep 2026) fronts Speaches, whose STT is dead in deployment — make the STT engine swappable (whisper.cpp/local GPU beside Speaches) and add a health check that reports the actual STT state in the UI instead of failing live-capture silently. Also unlocks file-based audio e2e.
 - [ ] **File-drop transcription**: accept an audio/video file (or URL) instead of live mic only — reuses the same STT + summarize pipeline, makes the app usable from a phone recording.
 - [ ] **Model picker on settings page** populated from `GET /api/tags` (live list, matches what actually exists; see the ollama section in AGENTS.md).
 - [ ] **Tauri release pipeline**: CI job that builds the Windows exe (needs a Rust runner); publish artifacts per tag — the README advertises a desktop app but there is no build path recorded.
 - [ ] **Session persistence**: conversation sessions survive refresh (currently in-memory store/reload behavior — confirm what survives).
+- [ ] **Model-pin pre-flight** (found 2026-11-12): a configured-but-missing ollama model makes ollama attempt a PULL on first call, which reads as an infinite hang in the UI — validate configured models against `GET /api/tags` at boot and show a clear settings error.
 - [ ] **Pronunciation page polish**: wire scoring feedback into the gamification DB (xp/streak) consistently with FlashcardReview.
 - [ ] **README quick-start audit**: run the README steps on a clean machine path and fix whatever drifted (Docker mount names, port numbers, config keys).
 
